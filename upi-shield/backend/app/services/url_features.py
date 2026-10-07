@@ -4,6 +4,7 @@ from urllib.parse import urlparse
 
 from app import brands as brand_catalogue
 from app.schemas import Signal
+from app.services import evasion
 
 # keyword -> official registered domains (derived from the brand catalogue).
 BRANDS: dict[str, frozenset[str]] = {
@@ -12,7 +13,6 @@ BRANDS: dict[str, frozenset[str]] = {
 _KEYWORD_TO_BRAND = brand_catalogue.keyword_index()
 SUSPICIOUS_TLDS = {"xyz", "top", "click", "live", "icu", "site", "online", "shop", "buzz", "cfd"}
 LURE_WORDS = ("verify", "kyc", "update", "reward", "cashback", "refund", "secure", "login", "claim", "blocked")
-HOMOGLYPHS = str.maketrans({"0": "o", "1": "l", "3": "e", "5": "s", "4": "a"})
 
 
 def host_of(url: str) -> str:
@@ -52,9 +52,10 @@ def registered_domain(host: str) -> str:
 def score_url(url: str) -> tuple[float, list[Signal], str | None]:
     host = host_of(url)
     reg = registered_domain(host)
-    normalized = host.translate(HOMOGLYPHS).replace("rn", "m").replace("vv", "w")
+    normalized = evasion.skeleton(host)
     signals: list[Signal] = []
     brand_hit: str | None = None
+    owner = brand_catalogue.official_brand_for(reg)
 
     for keyword, official in BRANDS.items():
         if keyword in normalized and reg not in official:
@@ -64,15 +65,38 @@ def score_url(url: str) -> tuple[float, list[Signal], str | None]:
             if keyword not in host:
                 signals.append(Signal(name="homoglyph_obfuscation", weight=0.2,
                                       detail=f"{host} resembles '{keyword}' after character normalisation"))
+            embedded = evasion.embedded_official_domain(host, set(official), reg)
+            if embedded:
+                signals.append(Signal(name="official_domain_in_subdomain", weight=0.2,
+                                      detail=f"Official domain {embedded} is used as a prefix of {reg}"))
             break
+
+    if brand_hit is None and owner is None:
+        squatted = evasion.typosquat_keyword(normalized, list(BRANDS))
+        if squatted:
+            brand_hit = _KEYWORD_TO_BRAND[squatted]
+            signals.append(Signal(name="typosquatting", weight=0.45,
+                                  detail=f"{host} is one edit away from the brand keyword '{squatted}'"))
+
+    if evasion.has_mixed_scripts(host):
+        signals.append(Signal(name="idn_homograph", weight=0.3,
+                              detail=f"{evasion.decode_idn(host)} mixes Latin with Cyrillic/Greek look-alikes"))
+    if evasion.is_shortener(host):
+        signals.append(Signal(name="url_shortener", weight=0.1,
+                              detail=f"{host} is a URL shortener that hides the real destination"))
+    platform = evasion.free_hosting_platform(host)
+    if platform:
+        signals.append(Signal(name="free_hosting_platform", weight=0.1,
+                              detail=f"Hosted on {platform}, where anyone can publish instantly"))
 
     tld = host.rsplit(".", 1)[-1]
     if tld in SUSPICIOUS_TLDS:
         signals.append(Signal(name="suspicious_tld", weight=0.15, detail=f".{tld} is common in throwaway domains"))
     if host.startswith("xn--") or ".xn--" in host:
         signals.append(Signal(name="punycode", weight=0.2, detail="Punycode (IDN) host"))
-    if host.count("-") >= 2:
-        signals.append(Signal(name="many_hyphens", weight=0.1, detail=f"{host.count('-')} hyphens in host"))
+    hyphens = evasion.decode_idn(host).count("-")
+    if hyphens >= 2:
+        signals.append(Signal(name="many_hyphens", weight=0.1, detail=f"{hyphens} hyphens in host"))
     lures = [w for w in LURE_WORDS if w in url.lower()]
     if lures:
         signals.append(Signal(name="lure_keywords", weight=0.15, detail="Contains: " + ", ".join(lures)))

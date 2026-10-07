@@ -107,6 +107,18 @@ MOBILE_UA = ("Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 "
              "(KHTML, like Gecko) Chrome/126.0 Mobile Safari/537.36")
 
 
+CRAWLER_UA = "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
+
+
+def probe(url: str, user_agent: str, timeout: float = DEFAULT_TIMEOUT) -> FetchResult:
+    """Plain HTTP fetch with a specific User-Agent (used to detect cloaking). Never raises."""
+    try:
+        return _httpx_fetch(url, timeout, user_agent=user_agent)
+    except Exception as exc:  # noqa: BLE001 - a failed probe is itself evidence
+        logger.debug("fetcher: probe (%s) failed for %s: %s", user_agent[:20], url, exc)
+        return FetchResult(url=url, user_agent=user_agent)
+
+
 def save_evidence(data: bytes, suffix: str = "png") -> str | None:
     """Persist an evidence artefact by content hash and return its API path."""
     from app.config import get_settings

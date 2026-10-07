@@ -93,6 +93,21 @@ entities, incremented `sightings`, refreshed `last_seen`) instead of duplicating
    and scrapes analytics IDs. Each lookup is an injectable resolver; defaults use the
    network but return `None` on failure, so the stage degrades gracefully offline.
 
+### Evasion tactics (`services/evasion.py`)
+
+| Tactic | Detection |
+|--------|-----------|
+| IDN homographs (`pаytm.com` with a Cyrillic `а`) | Punycode is decoded and confusable characters are mapped to a Latin skeleton before brand matching; mixed-script labels are flagged |
+| Character substitution (`ph0nepe`, `rn` for `m`) | Digit homoglyphs and multi-character tricks are normalised |
+| Typosquatting (`phonpe`, `paytn`, `axisbnak`) | Brand keywords within one edit, with guards against ordinary words such as `payment` |
+| Official domain as a prefix (`phonepe.com.verify-user.top`) | Flagged in addition to the brand match |
+| URL shorteners and redirectors | The landing page is scored as well, and its domain becomes an entity |
+| Free hosting and tunnels (`*.web.app`, `*.ngrok-free.app`, ...) | Flagged as disposable infrastructure |
+| Cloaking | The page is also requested with a mobile browser and a search-crawler user agent; a crawler redirect away, error, or decoy content is flagged when the page impersonates a brand or collects credentials |
+| Mobile-only kits | Behaviour analysis also runs on the mobile view |
+| Anti-bot interstitials | Reported so analysts know the content may be hidden |
+| Throwaway domains | RDAP registration date: registered within 30 days (strong) or 180 days (weak) |
+
 Campaign clustering (`services/clustering.py`) unions candidates via shared **strong**
 entities (ip, cert_fingerprint, upi_id, phone, telegram, favicon_hash, analytics_id);
 registrar/asn are **weak** (recorded as evidence but never merge alone).

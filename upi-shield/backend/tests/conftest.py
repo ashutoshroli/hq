@@ -23,3 +23,13 @@ def demo_store():
     """Start every test from the seeded demo dataset (two campaigns)."""
     seed()
     yield
+
+
+@pytest.fixture(autouse=True)
+def offline_lookups(monkeypatch):
+    """Stub the secondary network lookups (RDAP, cloaking probes). Tests that exercise
+    them override these stubs explicitly."""
+    from app.services import enrichment, fetcher
+
+    monkeypatch.setattr(enrichment, "domain_created", lambda domain: None)
+    monkeypatch.setattr(fetcher, "probe", lambda url, ua, timeout=None: fetcher.FetchResult(url=url, user_agent=ua))

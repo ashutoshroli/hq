@@ -15,6 +15,8 @@ import re
 import socket
 import ssl
 from collections.abc import Callable
+from datetime import datetime
+from functools import lru_cache
 
 from app.schemas import Entity
 
@@ -78,9 +80,59 @@ def _default_cert_resolver(host: str) -> str | None:
         return None
 
 
+@lru_cache(maxsize=4096)
+def rdap_lookup(domain: str) -> dict:
+    """Registration data for a registrable domain via RDAP (rdap.org bootstrap).
+
+    Returns ``{"created": datetime | None, "registrar": str | None}``; both are None
+    on any failure. Results are cached per process.
+    """
+    empty: dict = {"created": None, "registrar": None}
+    if not domain or re.fullmatch(r"[\d.]+", domain):
+        return empty
+    try:
+        import httpx
+
+        resp = httpx.get(f"https://rdap.org/domain/{domain}", timeout=8.0, follow_redirects=True,
+                         headers={"Accept": "application/rdap+json", "User-Agent": "upi-shield/1.0"})
+        if resp.status_code != 200:
+            return empty
+        data = resp.json()
+    except Exception as exc:  # noqa: BLE001 - RDAP is best-effort
+        logger.debug("enrichment: RDAP failed for %s: %s", domain, exc)
+        return empty
+    return parse_rdap(data)
+
+
+def parse_rdap(data: dict) -> dict:
+    created = None
+    for event in data.get("events", []) or []:
+        if event.get("eventAction") == "registration" and event.get("eventDate"):
+            try:
+                created = datetime.fromisoformat(event["eventDate"].replace("Z", "+00:00"))
+            except ValueError:
+                created = None
+    registrar = None
+    for entity in data.get("entities", []) or []:
+        if "registrar" in (entity.get("roles") or []):
+            vcard = (entity.get("vcardArray") or [None, []])[1]
+            registrar = next((v[3] for v in vcard if v and v[0] == "fn" and len(v) > 3), None)
+            break
+    return {"created": created, "registrar": registrar}
+
+
+def domain_created(domain: str) -> datetime | None:
+    """Registration date of ``domain`` (None when unknown)."""
+    return rdap_lookup(domain)["created"]
+
+
 def _default_registrar_resolver(host: str) -> str | None:
-    """Optional WHOIS registrar lookup. python-whois is not a hard dependency, so
-    this imports lazily and returns None when the library is absent or lookup fails."""
+    """Registrar via RDAP, falling back to WHOIS when python-whois is installed."""
+    from app.services.url_features import registered_domain
+
+    registrar = rdap_lookup(registered_domain(host))["registrar"]
+    if registrar:
+        return registrar
     try:
         import whois  # type: ignore
 
