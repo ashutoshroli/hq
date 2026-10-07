@@ -149,3 +149,31 @@ def test_crawler_block_on_benign_site_is_informational_only():
                                 probes={"mobile": page, "crawler": blocked})
     cloak = next(s for s in cand.signals if s.name == "cloaking_detected")
     assert cloak.weight == 0.0 and cand.risk_score == 0.0
+
+
+@pytest.mark.parametrize(("status", "html", "title"), [
+    (451, "DEPLOYMENT_DISABLED", ""),
+    (404, "<title>Site Not Found</title>", "Site Not Found"),
+    (200, "<p>This deployment is unavailable</p>", ""),
+])
+def test_platform_takedown_pages_are_offline(status, html, title):
+    page = FetchResult(url="https://hdfc-sec.vercel.app", final_url="https://hdfc-sec.vercel.app", status=status,
+                       html=html, title=title, ok=True, screenshot_url="/evidence/abc.png")
+    assert evasion.offline_reason(page)
+    cand = pipeline.analyze_url(page.url, "feed", do_fetch=False, fetch_result=page)
+    assert cand.live is False and cand.screenshot_url == "/evidence/abc.png"
+    assert "site_offline" in {s.name for s in cand.signals}
+    assert cand.verdict == "malicious"  # the lookalike URL is still evidence of the campaign
+
+
+def test_live_page_and_unfetched_candidates():
+    page = _page("http://reward.top", PHISH)
+    assert evasion.offline_reason(page) is None
+    assert pipeline.analyze_url(page.url, "feed", do_fetch=False, fetch_result=page).live is True
+    assert pipeline.analyze_url("http://reward.top", "feed").live is None
+    assert evasion.offline_reason(FetchResult(url="http://x.top")) == "unreachable (DNS or connection failure)"
+
+
+def test_long_page_mentioning_not_found_is_live():
+    html = "<p>" + " ".join(f"word{i}" for i in range(400)) + " page not found tips</p>"
+    assert evasion.offline_reason(_page("http://blog.example", html)) is None

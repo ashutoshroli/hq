@@ -75,6 +75,9 @@ class Candidate(BaseModel):
     kind: CandidateKind = "web"  # "app" for Android APK candidates (url is android://<package>)
     app: AppSummary | None = None
     infrastructure: InfrastructureSummary | None = None
+    # Liveness at the last analysis: True = serving content, False = taken down / error
+    # page, None = not fetched. Lets analysts prioritise live threats.
+    live: bool | None = None
     # Analyst review (v0.2). False positives are excluded from campaigns and reports.
     review_status: ReviewStatus = "unreviewed"
     review_note: str | None = None

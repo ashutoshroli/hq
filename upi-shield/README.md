@@ -1,23 +1,40 @@
-# UPI Shield (backend)
+# UPI Shield: fake UPI and payment page and app detection at scale
 
-Anti-phishing / UPI Shield detection backend: ingests suspicious URLs and messages,
-scores them through a staged pipeline (lexical URL features -> visual/structural
-similarity -> behavioural DOM analysis -> infrastructure enrichment), clusters
-related clones into campaigns over shared infrastructure, and generates automated
-takedown reports. FastAPI with a SQLite-backed store; the default configuration runs
-offline and deterministically, and every network stage degrades gracefully.
+Backend for **Problem 11, Fake UPI and Payment Page and App Detection at Scale**
+(Track 03, Anti-Phishing & UPI Shield). It discovers clones of Indian banking and
+payment brands, scores them with URL, visual, behavioural and app analysis, maps the
+infrastructure behind them into campaigns, and drives takedowns to completion.
 
-## Run the backend
+## Requirements coverage
+
+| Requirement | Implementation |
+|-------------|----------------|
+| Crawler for suspicious pages and apps from certificate logs, messages and reports | CT discovery via the crt.sh PostgreSQL replica (`POST /crawl/ct`, optional schedule); SMS/WhatsApp extraction (`POST /ingest/message`); user reports and OpenPhish/URLhaus feeds (`/ingest/url`, `/ingest/batch`, `/ingest/feed`); APK upload/download and APK links found on phishing pages (`/ingest/app`, `/ingest/app/url`) |
+| Visual and behavioural similarity engine matching clones to genuine brands | Headless-Chromium screenshots compared with genuine brand pages by perceptual hashing; favicon and app-icon matching; brand identification from appearance alone; DOM behaviour (UPI PIN/OTP/card fields, cross-domain posts, obfuscated JS, APK pushes); APK static analysis |
+| Infrastructure graph linking domains, hosts, wallets and phone numbers into campaigns | Enrichment (IP, ASN, certificate, registrar, RDAP age, abuse contacts); union-find clustering over UPI handles, phones, Telegram ids, favicons, analytics ids, C2 hosts and signing certificates, with CDN-aware and weak-evidence rules; `GET /graph`, `GET /pivot` |
+| Analyst dashboard and automated takedown report generator | Dashboard summary API, review queue with audit trail, routed takedown plans with verified contacts, tracked takedown cases with liveness re-checks, reports for nine recipient types, and Markdown/JSON/STIX 2.1/ZIP evidence exports |
+| End-to-end detection pipeline | `python -m eval.live_demo` (live, see below) and `python -m eval.campaign_demo` (offline) |
+| Precision/recall on a labelled sample | Real-world held-out benchmark: **precision 0.875, recall 0.778, FPR 0.23%** (see Evaluation) |
+| Campaign-clustering demo | `python -m eval.campaign_demo`, plus the live demo |
+| Key challenges (visual similarity, URL and behavioural analysis, evasion) | Screenshot similarity calibrated against cross-brand separation; homographs, typosquats, combosquats, shorteners, free hosting, cloaking, mobile-only kits, bot walls, new domains |
+
+## Quick start
 
     cd backend
     python -m venv .venv && . .venv/bin/activate
-    pip install -r requirements.txt
-    uvicorn app.main:app --reload      # open http://localhost:8000/docs
-    pip install -r requirements-dev.txt
-    python -m pytest                   # offline test suite
+    pip install -r requirements.txt -r requirements-dev.txt
+    playwright install chromium          # screenshots; optional, falls back to HTTP
+    uvicorn app.main:app --reload        # API docs at http://localhost:8000/docs
+    python -m pytest                     # offline test suite
+    python -m eval.evaluate              # precision / recall
+    python -m eval.campaign_demo         # offline clustering + takedown demo
+    python -m eval.live_demo --limit 30  # live end-to-end run (network)
+
+Or with Docker: `docker compose up --build` (set `ANALYZE_FETCH=1` for live analysis).
 
 Demo data (two campaigns) is seeded on first start when the store is empty. Data is
-persisted to `backend/data/upi_shield.db` (override with `UPI_SHIELD_DB`).
+persisted to `backend/data/upi_shield.db` (override with `UPI_SHIELD_DB`). The default
+configuration is offline and deterministic; every network stage degrades gracefully.
 
 ## API overview
 
@@ -250,3 +267,45 @@ prints the discovered campaigns (members + shared-infrastructure evidence) plus 
 auto-generated takedown report for one campaign (two campaigns on the sample: a
 PhonePe/Paytm cluster linked by a reused favicon + UPI handle, and an SBI/HDFC cluster
 linked by a shared host IP + callback phone).
+
+## Live end-to-end demo
+
+`python -m eval.live_demo` pulls currently reported phishing URLs that reference
+monitored brands (one URL per host), renders each page, runs every stage, clusters the
+results and prints the takedown plan for the largest campaign. It uses a throwaway
+database, so analyst data is never touched.
+
+Sample run on 2026-10-07, 30 hosts from Phishing.Database:
+
+* 22 of 30 hosts were flagged. The 8 unflagged hosts include
+  `clctab.axisbank.co.in` (a genuine Axis Bank host wrongly listed in the feed) and
+  hosts with no brand evidence left once their pages were gone.
+* Only 1 of the 22 flagged hosts still served content. The rest had already been
+  disabled by their platforms: Vercel answered HTTP 451 `DEPLOYMENT_DISABLED`, and
+  Firebase and 000webhost served "Site Not Found". The pipeline records this as
+  `live: false` with a `site_offline` signal and keeps the error-page screenshot as
+  takedown evidence.
+* No campaigns formed in this sample. With the kits offline, no page content (UPI
+  handles, phones, analytics ids) remained to link them, and the CDN-aware rules
+  correctly refused to merge sites that merely share Vercel or Cloudflare edge IPs.
+
+This also shows why the CT crawler matters: feeds report pages after victims have
+seen them, whereas certificate logs reveal lookalike names when they are certified,
+often before the page goes live.
+
+## Known limitations
+
+* **Small positive class in the benchmark.** Public feeds contain few hosts that
+  impersonate Indian payment brands (27 in the held-out split), so the confidence
+  intervals are wide. The benchmark is host-level and evaluates URL features only;
+  page-level stages are covered by the controlled sample and the live demo.
+* **Brand-keyword dependence of URL scoring.** Hosts that never mention a brand are
+  caught only by the visual stage, which requires the page to be reachable.
+* **Reference library freshness.** Screenshot and icon references must be rebuilt
+  (`python -m app.tools.build_brand_refs`) when a brand redesigns its site. HDFC Bank
+  blocks desktop crawlers, so only its mobile view is referenced.
+* **Unverified contacts are not guessed.** Brand phishing-report addresses are
+  included only where published on the brand's own site (ICICI, HDFC); other brands
+  show `lookup_required`.
+* **No dashboard UI in this repository.** The API is the dashboard backend; the
+  frontend is a separate deliverable.

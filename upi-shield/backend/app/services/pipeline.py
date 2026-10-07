@@ -50,6 +50,18 @@ def analyze_url(url: str, source: SourceType, extra_entities: list[Entity] | Non
             probes = probes if probes is not None else _probes(url)
     probes = probes or {}
 
+    live: bool | None = None
+    offline = evasion.offline_reason(result) if result is not None else None
+    if result is not None:
+        live = offline is None
+        if offline:
+            signals.append(Signal(name="site_offline", weight=0.0,
+                                  detail=f"Not serving content at analysis time: {offline}"))
+            # Error pages carry no evidence about the clone: analyse URL and infrastructure only,
+            # but keep the screenshot as proof of the takedown state.
+            screenshot_url = getattr(result, "screenshot_url", None)
+            result = None
+
     if result is not None and getattr(result, "ok", False):
         final_host = url_features.host_of(result.final_url or url)
         final_reg = url_features.registered_domain(final_host)
@@ -59,7 +71,7 @@ def analyze_url(url: str, source: SourceType, extra_entities: list[Entity] | Non
         if result.favicon_hash:
             entities.append(Entity(type="favicon_hash", value=result.favicon_hash))
         # screenshot_url is set only when a renderer captured one (Playwright path).
-        screenshot_url = getattr(result, "screenshot_url", None)
+        screenshot_url = getattr(result, "screenshot_url", None) or screenshot_url
 
         if owner is not None:
             # The page is served from a domain the brand owns: genuine infrastructure.
@@ -160,5 +172,5 @@ def analyze_url(url: str, source: SourceType, extra_entities: list[Entity] | Non
         first_seen=datetime.now(UTC), risk_score=round(score, 3),
         verdict=url_features.verdict_for(score), brand_matched=brand,
         visual_similarity=visual_similarity,
-        signals=signals, entities=entities, screenshot_url=screenshot_url, infrastructure=infra,
+        signals=signals, entities=entities, screenshot_url=screenshot_url, infrastructure=infra, live=live,
     )

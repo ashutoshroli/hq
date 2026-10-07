@@ -208,7 +208,11 @@ def _try_playwright(url: str, timeout: float, mobile: bool = False) -> FetchResu
                            ok=True, screenshot=shot, favicon_bytes=icon_bytes,
                            screenshot_url=save_evidence(shot), title=title, user_agent=ua)
     except Exception as exc:  # noqa: BLE001 - fall back to httpx
-        logger.warning("fetcher: playwright render failed, falling back: %s", exc)
+        message = str(exc).splitlines()[0] if str(exc) else type(exc).__name__
+        if "ERR_NAME_NOT_RESOLVED" in message:
+            logger.info("fetcher: %s does not resolve", url)
+            return FetchResult(url=url, status=0)  # dead DNS: an HTTP retry cannot succeed
+        logger.info("fetcher: render failed for %s (%s); falling back to HTTP", url, message)
         return None
 
 
@@ -278,7 +282,7 @@ def fetch(url: str, timeout: float = DEFAULT_TIMEOUT, use_playwright: bool | Non
     try:
         return _httpx_fetch(url, timeout)
     except Exception as exc:  # noqa: BLE001 - degrade gracefully
-        logger.warning("fetcher: httpx fetch failed for %s: %s", url, exc)
+        logger.info("fetcher: HTTP fetch failed for %s: %s", url, exc)
         return FetchResult(url=url)
 
 
