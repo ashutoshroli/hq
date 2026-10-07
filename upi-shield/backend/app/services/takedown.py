@@ -1,4 +1,5 @@
 """Takedown report text per recipient. Extend with WHOIS/hosting contacts and screenshots."""
+import re
 from datetime import UTC, datetime
 
 from app.schemas import Campaign, Candidate, Recipient, TakedownReport
@@ -10,6 +11,8 @@ INTRO = {
     "npci": "Please review and block the UPI handles listed below, which collect payments through fraudulent pages.",
     "cert_in": "Reporting a coordinated phishing campaign impersonating Indian payment brands.",
     "safe_browsing": "Please add the URLs below to the phishing blocklist.",
+    "app_store": ("Please remove the Android applications below and flag them in Google Play Protect. "
+                  "They impersonate payment brands to steal UPI credentials and OTPs."),
 }
 
 
@@ -22,6 +25,7 @@ RECIPIENT_ENTITY_TYPES: dict[Recipient, tuple[str, ...]] = {
     "npci": ("upi_id", "phone"),
     "cert_in": ("ip", "asn", "registrar", "upi_id", "phone"),
     "safe_browsing": (),  # URLs are listed from members below, not shared entities
+    "app_store": ("signing_cert", "package_name", "domain"),
 }
 
 # Recipients who need the concrete domains being taken down. 'domain' is unique per
@@ -37,6 +41,7 @@ RECIPIENT_CONTEXT_LABEL: dict[Recipient, str] = {
     "npci": "UPI handle context",
     "cert_in": "Infrastructure context",
     "safe_browsing": "URLs to blocklist",
+    "app_store": "Application context",
 }
 
 
@@ -46,9 +51,19 @@ def _recipient_context(campaign: Campaign, members: list[Candidate], recipient: 
     report never breaks when the relevant entities are absent."""
     lines = ["", f"{RECIPIENT_CONTEXT_LABEL[recipient]}:"]
     if recipient == "safe_browsing":
-        urls = [m.url for m in members]
+        urls = [m.url for m in members if m.kind == "web"]
         lines += [f"  - {u}" for u in urls] or ["  - (none available)"]
         return lines
+    if recipient == "app_store":
+        for m in (m for m in members if m.kind == "app" and m.app):
+            lines.append(f"  - {m.app.label} ({m.app.package}, version {m.app.version or 'unknown'})")
+            lines.append(f"      APK SHA-256: {m.app.sha256}")
+            for cert in m.app.cert_sha256:
+                lines.append(f"      signing certificate SHA-256: {cert}")
+            if m.app.origin_url:
+                lines.append(f"      distributed from: {m.app.origin_url}")
+        if len(lines) == 2:
+            lines.append("  - (no Android applications in this campaign)")
 
     context: list[str] = []
     # Per-member domains for recipients that act on the domains directly (registrar,
@@ -56,6 +71,9 @@ def _recipient_context(campaign: Campaign, members: list[Candidate], recipient: 
     if recipient in RECIPIENT_WANTS_DOMAINS:
         seen: set[str] = set()
         for m in members:
+            # Registrars act on registered names only: skip apps and raw-IP hosts.
+            if m.kind == "app" or re.fullmatch(r"[\d.]+|\[?[0-9a-f:]+\]?", m.domain or ""):
+                continue
             if m.domain and m.domain not in seen:
                 seen.add(m.domain)
                 context.append(f"  - domain: {m.domain}")
@@ -75,8 +93,11 @@ def generate(campaign: Campaign, members: list[Candidate], recipient: Recipient)
     lines += _recipient_context(campaign, members, recipient)
     lines += ["", "Reported URLs:"]
     for m in members:
-        reasons = "; ".join(s.name for s in m.signals[:3]) or "n/a"
-        lines.append(f"  - {m.url}  (risk {m.risk_score:.2f}, seen {m.first_seen:%Y-%m-%d %H:%M} UTC; {reasons})")
+        reasons = "; ".join(s.name for s in m.signals if s.weight > 0)[:200] or "n/a"
+        what = f"Android app {m.app.label} ({m.app.package})" if m.kind == "app" and m.app else m.url
+        lines.append(f"  - {what}  (risk {m.risk_score:.2f}, seen {m.first_seen:%Y-%m-%d %H:%M} UTC; {reasons})")
+        if m.screenshot_url:
+            lines.append(f"      screenshot evidence: {m.screenshot_url}")
     lines += ["", "Generated automatically; analyst-reviewed before sending."]
     return TakedownReport(campaign_id=campaign.id, recipient=recipient, generated_at=datetime.now(UTC),
                           subject=f"Phishing takedown request: {campaign.name}", body="\n".join(lines))

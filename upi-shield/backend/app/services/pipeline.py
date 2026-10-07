@@ -32,7 +32,8 @@ def _probes(url: str) -> dict:
 
 
 def analyze_url(url: str, source: SourceType, extra_entities: list[Entity] | None = None,
-                do_fetch: bool | None = None, fetch_result=None, probes: dict | None = None) -> Candidate:
+                do_fetch: bool | None = None, fetch_result=None, probes: dict | None = None,
+                on_apk_links=None) -> Candidate:
     _score, signals, brand = url_features.score_url(url)
     host = url_features.host_of(url)
     entities = [Entity(type="domain", value=host)] + (extra_entities or [])
@@ -115,6 +116,10 @@ def analyze_url(url: str, source: SourceType, extra_entities: list[Entity] | Non
                     for sig in behaviour.analyze_behaviour(mobile, impersonating=brand is not None)
                     if sig.name not in seen]
             signals.extend(behaviour_signals)
+            if on_apk_links is not None:
+                links = behaviour.apk_links(result) or behaviour.apk_links(probes.get("mobile"))
+                if links:
+                    on_apk_links(links)
 
             # Many legitimate sites also refuse spoofed crawler requests, so cloaking only
             # counts fully when the page impersonates a brand or collects credentials.

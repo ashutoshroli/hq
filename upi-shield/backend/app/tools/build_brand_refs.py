@@ -61,6 +61,30 @@ def _favicons(page, base_url: str) -> list[bytes]:
     return icons
 
 
+def _app_references(brand) -> list[dict]:
+    """Fingerprint the icon of every official app listing of a brand on Google Play."""
+    import httpx
+
+    from app.services import playstore
+
+    apps = []
+    for package in brand.android_packages:
+        listing = playstore.fetch_listing(package)
+        if listing is None or not listing.icon_url:
+            logger.warning("%s: no Play listing for %s", brand.key, package)
+            continue
+        try:
+            # Play image URLs carry sizing options after "="; request a 256 px square.
+            icon_url = listing.icon_url.split("=")[0] + "=w256-h256"
+            icon = httpx.get(icon_url, timeout=20.0, follow_redirects=True).content
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("%s: icon download failed for %s: %s", brand.key, package, exc)
+            continue
+        apps.append({"package": package, "title": listing.title, "developer": listing.developer,
+                     "icon_phash": imaging.phash(icon), "icon_dhash": imaging.dhash(icon)})
+    return apps
+
+
 def build(selected: list[str] | None = None) -> dict:
     from playwright.sync_api import sync_playwright
 
@@ -73,7 +97,8 @@ def build(selected: list[str] | None = None) -> dict:
         for brand in brands.BRANDS.values():
             if selected and brand.key not in selected:
                 continue
-            entry = {"screenshots": [], "favicon_md5": [], "favicon_phash": [], "titles": []}
+            entry = {"screenshots": [], "favicon_md5": [], "favicon_phash": [], "titles": [],
+                     "apps": _app_references(brand)}
             for url in brand.reference_urls:
                 for name, opts in VIEWPORTS.items():
                     ctx = browser.new_context(**opts, locale="en-IN")
@@ -118,7 +143,8 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     out = build(args.brand)
     for key, entry in sorted(out["brands"].items()):
-        print(f"{key:<10} screenshots={len(entry['screenshots'])} favicons={len(entry['favicon_md5'])}")
+        print(f"{key:<10} screenshots={len(entry['screenshots'])} favicons={len(entry['favicon_md5'])} "
+              f"apps={len(entry.get('apps', []))}")
     return 0
 
 

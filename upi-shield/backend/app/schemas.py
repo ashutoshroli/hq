@@ -9,8 +9,10 @@ Verdict = Literal["malicious", "suspicious", "benign"]
 EntityType = Literal[
     "domain", "ip", "asn", "cert_fingerprint", "registrar",
     "upi_id", "phone", "telegram", "favicon_hash", "analytics_id",
+    "package_name", "apk_sha256", "signing_cert",
 ]
-Recipient = Literal["registrar", "hosting", "bank", "npci", "cert_in", "safe_browsing"]
+Recipient = Literal["registrar", "hosting", "bank", "npci", "cert_in", "safe_browsing", "app_store"]
+CandidateKind = Literal["web", "app"]
 
 
 class Entity(BaseModel):
@@ -23,6 +25,17 @@ class Signal(BaseModel):
     name: str
     weight: float
     detail: str
+
+
+class AppSummary(BaseModel):
+    """Static-analysis facts for an Android app candidate (``kind == "app"``)."""
+    package: str
+    label: str
+    version: str | None = None
+    sha256: str
+    permissions: list[str] = []
+    cert_sha256: list[str] = []
+    origin_url: str | None = None  # where the APK was downloaded from, when known
 
 
 class Candidate(BaseModel):
@@ -42,6 +55,8 @@ class Candidate(BaseModel):
     # Additive fields (v0.2). Optional so existing clients are unaffected.
     last_seen: datetime | None = None  # most recent sighting of the same normalised URL
     sightings: int = 1  # how many times the URL was ingested from any source
+    kind: CandidateKind = "web"  # "app" for Android APK candidates (url is android://<package>)
+    app: AppSummary | None = None
 
 
 class IngestUrlRequest(BaseModel):
@@ -64,6 +79,11 @@ class IngestResponse(BaseModel):
     status: JobStatus
     candidate_ids: list[str]
     extracted: dict[str, list[str]] = {}  # urls, upi_ids, phones found in the message
+
+
+class IngestAppUrlRequest(BaseModel):
+    url: str  # direct link to an APK, e.g. one offered by a phishing page
+    source: SourceType = "user_report"
 
 
 class IngestBatchRequest(BaseModel):
