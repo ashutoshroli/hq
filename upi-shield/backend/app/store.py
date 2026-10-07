@@ -22,7 +22,7 @@ from datetime import UTC, datetime
 from urllib.parse import urlsplit, urlunsplit
 
 from app.config import get_settings
-from app.schemas import Campaign, Candidate, Job
+from app.schemas import AuditEvent, Campaign, Candidate, Job, TakedownCase
 from app.services.clustering import build_campaigns
 
 logger = logging.getLogger(__name__)
@@ -41,6 +41,19 @@ CREATE INDEX IF NOT EXISTS idx_candidates_domain ON candidates(domain);
 CREATE INDEX IF NOT EXISTS idx_candidates_score ON candidates(risk_score);
 CREATE TABLE IF NOT EXISTS jobs (
     id          TEXT PRIMARY KEY,
+    created_at  TEXT NOT NULL,
+    payload     TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS audit (
+    id          TEXT PRIMARY KEY,
+    at          TEXT NOT NULL,
+    target      TEXT NOT NULL,
+    payload     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_audit_target ON audit(target);
+CREATE TABLE IF NOT EXISTS takedowns (
+    id          TEXT PRIMARY KEY,
+    campaign_id TEXT NOT NULL,
     created_at  TEXT NOT NULL,
     payload     TEXT NOT NULL
 );
@@ -128,6 +141,9 @@ class Store:
                 merged_entities.append(e)
         return incoming.model_copy(update={
             "id": existing.id,
+            # Analyst decisions survive re-analysis of the same URL.
+            "review_status": existing.review_status, "review_note": existing.review_note,
+            "reviewed_by": existing.reviewed_by, "reviewed_at": existing.reviewed_at,
             "first_seen": min(existing.first_seen, incoming.first_seen),
             "last_seen": max(existing.last_seen or existing.first_seen, incoming.first_seen),
             "sightings": existing.sightings + 1,
@@ -171,6 +187,8 @@ class Store:
             self._url_index.clear()
             self.campaigns = []
             self._conn.execute("DELETE FROM candidates")
+            self._conn.execute("DELETE FROM takedowns")
+            self._conn.execute("DELETE FROM audit")
             self._conn.commit()
 
     # -- clustering ---------------------------------------------------------------
@@ -227,6 +245,49 @@ class Store:
             rows = self._conn.execute(
                 "SELECT payload FROM jobs ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
         return [Job.model_validate_json(r[0]) for r in rows]
+
+    # -- audit trail ----------------------------------------------------------------
+    def audit(self, actor: str, action: str, target: str, detail: dict | None = None) -> AuditEvent:
+        import uuid
+
+        event = AuditEvent(id=uuid.uuid4().hex[:12], at=datetime.now(UTC), actor=actor, action=action,
+                           target=target, detail=detail or {})
+        with self._lock, self._conn:
+            self._conn.execute("INSERT INTO audit (id, at, target, payload) VALUES (?, ?, ?, ?)",
+                               (event.id, event.at.isoformat(), target, event.model_dump_json()))
+        return event
+
+    def audit_log(self, target: str | None = None, limit: int = 200) -> list[AuditEvent]:
+        with self._lock:
+            if target:
+                rows = self._conn.execute("SELECT payload FROM audit WHERE target = ? ORDER BY at DESC LIMIT ?",
+                                          (target, limit)).fetchall()
+            else:
+                rows = self._conn.execute("SELECT payload FROM audit ORDER BY at DESC LIMIT ?", (limit,)).fetchall()
+        return [AuditEvent.model_validate_json(r[0]) for r in rows]
+
+    # -- takedown cases -------------------------------------------------------------
+    def save_takedown(self, case: TakedownCase) -> TakedownCase:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO takedowns (id, campaign_id, created_at, payload) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET payload=excluded.payload",
+                (case.id, case.campaign_id, case.created_at.isoformat(), case.model_dump_json()))
+        return case
+
+    def get_takedown(self, case_id: str) -> TakedownCase | None:
+        with self._lock:
+            row = self._conn.execute("SELECT payload FROM takedowns WHERE id = ?", (case_id,)).fetchone()
+        return TakedownCase.model_validate_json(row[0]) if row else None
+
+    def list_takedowns(self, campaign_id: str | None = None) -> list[TakedownCase]:
+        with self._lock:
+            if campaign_id:
+                rows = self._conn.execute("SELECT payload FROM takedowns WHERE campaign_id = ? ORDER BY created_at",
+                                          (campaign_id,)).fetchall()
+            else:
+                rows = self._conn.execute("SELECT payload FROM takedowns ORDER BY created_at DESC").fetchall()
+        return [TakedownCase.model_validate_json(r[0]) for r in rows]
 
     def stats(self) -> dict:
         with self._lock:

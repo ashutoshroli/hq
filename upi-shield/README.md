@@ -27,12 +27,40 @@ persisted to `backend/data/upi_shield.db` (override with `UPI_SHIELD_DB`).
 | Ingestion | `POST /ingest/url`, `POST /ingest/message`, `POST /ingest/batch`, `POST /ingest/feed`, `POST /ingest/app`, `POST /ingest/app/url`, `POST /crawl/ct` |
 | Jobs | `GET /jobs`, `GET /jobs/{id}` |
 | Analysis | `GET /candidates` (filters: `min_score`, `verdict`, `kind`, `brand`, `source`, `campaign_id`, `q`, `limit`, `offset`), `GET /candidates/{id}`, `GET /campaigns`, `GET /campaigns/{id}`, `GET /graph`, `GET /pivot` |
-| Reporting | `POST /reports/takedown`, `GET /eval/metrics` |
+| Workflow | `POST /candidates/{id}/review`, `GET /audit`, `GET /campaigns/{id}/takedown-plan`, `POST /takedowns`, `GET /takedowns`, `GET`/`PATCH /takedowns/{id}`, `POST /takedowns/{id}/recheck`, `GET /dashboard/summary` |
+| Reporting | `POST /reports/takedown`, `GET /campaigns/{id}/export?format=markdown\|json\|stix\|zip`, `GET /evidence/{name}`, `GET /eval/metrics` |
 
 Batch, feed and crawl requests return `202 Accepted` with a `job_id`; poll
 `GET /jobs/{id}` for status (`queued`, `running`, `done`, `failed`) and progress.
 Re-ingesting a URL that is already known updates the existing candidate (merged
 entities, incremented `sightings`, refreshed `last_seen`) instead of duplicating it.
+
+## Analyst workflow and takedowns
+
+1. **Triage:** `GET /dashboard/summary` returns totals, detections per day, top
+   signals, brand breakdown, takedown SLA and the highest-risk unreviewed candidates.
+2. **Review:** `POST /candidates/{id}/review` with `confirmed`, `false_positive` or
+   `escalated`. False positives leave campaigns and reports. Decisions survive
+   re-analysis, and every action is written to the audit trail (`GET /audit`).
+3. **Plan:** `GET /campaigns/{id}/takedown-plan` routes each target to the party that
+   can act on it, using only verified contacts:
+   * registrar abuse contacts (RDAP) and hosting abuse contacts (RIPEstat);
+   * platform abuse channels for free hosting (Cloudflare Pages, Vercel, Netlify,
+     GitHub Pages, Firebase, …);
+   * phishing-report addresses published by the brands themselves;
+   * NPCI for UPI handles, Sanchar Saathi for fraud phone numbers, Google Play Protect
+     for apps, Safe Browsing, CERT-In (`incident@cert-in.org.in`) and the National
+     Cyber Crime Reporting Portal (cybercrime.gov.in, helpline 1930).
+
+   When no verified contact exists, the item is marked `lookup_required` instead of
+   guessing.
+4. **Track:** `POST /takedowns` opens a case with the generated report;
+   `PATCH /takedowns/{id}` moves it through `drafted → sent → acknowledged → resolved`
+   (or `rejected`). `POST /takedowns/{id}/recheck` probes every target and resolves the
+   case automatically once all are offline.
+5. **Share:** `GET /campaigns/{id}/export` produces a Markdown dossier, JSON, a
+   **STIX 2.1** bundle for CERT-In, ISACs or a TIP, or a ZIP evidence package
+   (dossier, data, STIX, one report per recipient, and screenshots).
 
 ## Discovery sources
 
