@@ -12,7 +12,7 @@ infrastructure behind them into campaigns, and drives takedowns to completion.
 | Crawler for suspicious pages and apps from certificate logs, messages and reports | CT discovery via the crt.sh PostgreSQL replica (`POST /crawl/ct`, optional schedule); SMS/WhatsApp extraction (`POST /ingest/message`), including link-less lures stored as message candidates; user reports and OpenPhish/URLhaus feeds (`/ingest/url`, `/ingest/batch`, `/ingest/feed`); APK upload/download, plus APK links from messages, reports, feeds and phishing pages routed to app analysis (`/ingest/app`, `/ingest/app/url`) |
 | Visual and behavioural similarity engine matching clones to genuine brands | Headless-Chromium screenshots compared with genuine brand pages by perceptual hashing; favicon and app-icon matching; brand identification from appearance alone; DOM behaviour (UPI PIN/OTP/card fields, cross-domain posts, obfuscated JS, APK pushes); APK static analysis |
 | Infrastructure graph linking domains, hosts, wallets and phone numbers into campaigns | Enrichment (IP, ASN, certificate, registrar, RDAP age, abuse contacts); union-find clustering over UPI handles, phones, Telegram ids, favicons, analytics ids, C2 hosts and signing certificates, with CDN-aware and weak-evidence rules; `GET /graph`, `GET /pivot` |
-| Analyst dashboard and automated takedown report generator | Dashboard summary API, review queue with audit trail, routed takedown plans with verified contacts, tracked takedown cases with liveness re-checks, reports for nine recipient types, and Markdown/JSON/STIX 2.1/ZIP evidence exports |
+| Analyst dashboard and automated takedown report generator | Web dashboard (`frontend/`, see below); dashboard summary API, review queue with audit trail, routed takedown plans with verified contacts, tracked takedown cases with liveness re-checks, reports for nine recipient types, and Markdown/JSON/STIX 2.1/ZIP evidence exports |
 | End-to-end detection pipeline | `python -m eval.live_demo` (live, see below) and `python -m eval.campaign_demo` (offline) |
 | Precision/recall on a labelled sample | Real-world held-out benchmark: **precision 0.875, recall 0.778, FPR 0.23%** (see Evaluation) |
 | Campaign-clustering demo | `python -m eval.campaign_demo`, plus the live demo |
@@ -37,6 +37,23 @@ The dashboard lives in `frontend/` (see `frontend/README.md`).
 Demo data (two campaigns) is seeded on first start when the store is empty. Data is
 persisted to `backend/data/upi_shield.db` (override with `UPI_SHIELD_DB`). The default
 configuration is offline and deterministic; every network stage degrades gracefully.
+
+## Analyst dashboard
+
+`frontend/` is a React + TypeScript dashboard, served on http://localhost:8080 by
+`docker compose up --build`. For development, run its dev server as described in
+`frontend/README.md`.
+
+| Page | What analysts do there |
+|------|------------------------|
+| **Overview** | Threat totals, live vs offline, detections per day, brands and sources, most common evidence, takedown progress, highest-risk unreviewed items |
+| **Detections** | Search and filter every site, app and message (filters live in the URL) |
+| **Detection detail** | Why it was flagged, screenshot, app or message details, infrastructure with one-click pivots to related detections, review (confirm, false positive, escalate) and history |
+| **Campaigns** | Campaign cards and an infrastructure map of all flagged assets |
+| **Campaign detail** | Interactive graph of shared UPI handles, phones, hosting and assets; members; routed takedown plan; takedown cases (draft, open in e-mail, mark sent, re-check liveness); Dossier, STIX 2.1, JSON and evidence ZIP exports |
+| **Report** | Submit a link, SMS/WhatsApp text, APK, bulk links, a threat feed or a certificate-log search |
+| **Jobs** | Live progress of background runs |
+| **Accuracy** | Held-out precision, recall and false-alarm rate, plus per-stage results |
 
 ## API overview
 
@@ -319,6 +336,3 @@ often before the page goes live.
 * **Unverified contacts are not guessed.** Brand phishing-report addresses are
   included only where published on the brand's own site (ICICI, HDFC); other brands
   show `lookup_required`.
-* **Dashboard in progress.** The `frontend/` dashboard provides the overview,
-  detections (list, detail and review), reporting/ingestion, jobs and settings pages;
-  campaign, graph, takedown and evaluation screens follow.

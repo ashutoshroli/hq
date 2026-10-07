@@ -265,7 +265,7 @@ def takedown_plan(camp_id: str):
 def create_takedown(req: TakedownCreateRequest):
     """Open a tracked takedown case with its generated report."""
     camp, members = _campaign(req.campaign_id)
-    case = store.save_takedown(casework.create_case(camp, members, req.recipient, req.contact))
+    case = store.save_takedown(casework.create_case(camp, members, req.recipient, req.contact, req.targets))
     store.audit(req.analyst, "takedown.create", case.id, {"campaign_id": camp.id, "recipient": req.recipient,
                                                            "contact": case.contact})
     return case

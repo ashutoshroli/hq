@@ -161,3 +161,18 @@ def test_candidates_can_be_filtered_by_review_status():
         confirmed = client.get("/candidates", params={"review": "confirmed"}).json()
         assert [c["id"] for c in confirmed] == [cid]
         assert cid not in [c["id"] for c in client.get("/candidates", params={"review": "unreviewed"}).json()]
+
+
+def test_takedown_case_can_be_scoped_to_one_plan_item():
+    camp, members = _first_campaign()
+    phonepe_urls = [m.url for m in members if m.brand_matched == "phonepe"]
+    assert phonepe_urls and len(phonepe_urls) < len(members)
+    case = casework.create_case(camp, members, "bank", targets=phonepe_urls)
+    assert case.targets == phonepe_urls
+    reported = case.report.body.split("Reported URLs:")[1]
+    assert all(u in reported for u in phonepe_urls)
+    assert not any(m.url in reported for m in members if m.brand_matched != "phonepe")
+    with TestClient(app) as client:
+        request = {"campaign_id": camp.id, "recipient": "bank", "targets": phonepe_urls}
+        body = client.post("/takedowns", json=request).json()
+        assert body["targets"] == phonepe_urls
