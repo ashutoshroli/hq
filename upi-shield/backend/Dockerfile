@@ -1,13 +1,20 @@
 FROM python:3.12-slim
 
+# Set WITH_BROWSER=false for a smaller image without headless Chromium; the fetcher
+# then falls back to plain HTTP and visual matching uses favicon and page structure.
+ARG WITH_BROWSER=true
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     UPI_SHIELD_DB=/srv/data/upi_shield.db \
     UPI_SHIELD_EVIDENCE_DIR=/srv/data/evidence
 
 WORKDIR /srv
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt \
+ && if [ "$WITH_BROWSER" = "true" ]; then playwright install --with-deps chromium-headless-shell \
+      && rm -rf /var/lib/apt/lists/*; fi
 
 COPY app ./app
 # Ship the committed evaluation metrics so GET /eval/metrics serves real numbers.

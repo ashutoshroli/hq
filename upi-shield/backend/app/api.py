@@ -1,9 +1,11 @@
 import json
 import logging
 import os
+import re
 import uuid
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi.responses import FileResponse
 
 from app.config import get_settings
 from app.jobs import jobs
@@ -202,6 +204,20 @@ def eval_metrics():
     except Exception as exc:  # noqa: BLE001 - never let a bad artifact break the endpoint
         logger.warning("eval_metrics: failed to load %s: %s", _METRICS_PATH, exc)
     return _PLACEHOLDER_METRICS
+
+
+_EVIDENCE_NAME = re.compile(r"[0-9a-f]{24}\.(png|jpg|html)")
+
+
+@router.get("/evidence/{name}", tags=["reporting"], response_class=FileResponse)
+def get_evidence(name: str):
+    """Serve a captured evidence artefact (e.g. a page screenshot) by content hash."""
+    if not _EVIDENCE_NAME.fullmatch(name):
+        raise HTTPException(404, "evidence not found")
+    path = os.path.join(get_settings().evidence_dir, name)
+    if not os.path.isfile(path):
+        raise HTTPException(404, "evidence not found")
+    return FileResponse(path)
 
 
 # --- administration -----------------------------------------------------------------

@@ -54,10 +54,14 @@ _OBFUSCATION_PATTERNS = [
 # Long base64-ish blob (common in packed/obfuscated payloads).
 _BASE64_BLOB = re.compile(r"[A-Za-z0-9+/]{120,}={0,2}")
 
+# Imperative credential prompts. Bare product words ("credit card", "debit card")
+# are deliberately excluded: every genuine bank and wallet page mentions them.
 _HARVEST_WORDS = (
     "enter your upi pin", "enter upi pin", "enter otp", "verify otp", "enter your otp",
-    "card number", "cvv", "net banking password", "login password", "atm pin",
-    "debit card", "credit card", "aadhaar", "update your kyc", "verify your account",
+    "enter card number", "enter your card number", "enter cvv", "enter your cvv",
+    "net banking password", "enter your password", "atm pin", "enter your aadhaar",
+    "update your kyc", "complete your kyc", "complete kyc", "verify your account",
+    "account will be blocked", "account has been blocked", "account will be suspended",
 )
 
 
@@ -108,8 +112,14 @@ def _host(url: str) -> str:
         return ""
 
 
-def analyze_behaviour(fetch_result) -> list[Signal]:
-    """Inspect a fetched page and return phishing-behaviour Signals ([] when no html)."""
+def analyze_behaviour(fetch_result, impersonating: bool = True) -> list[Signal]:
+    """Inspect a fetched page and return phishing-behaviour Signals ([] when no html).
+
+    Obfuscated JavaScript and credential prompts are common on legitimate sites too
+    (minified bundles, login pages). They carry full weight only in a phishing context:
+    the page collects sensitive credentials, or it impersonates a brand
+    (``impersonating``). Otherwise they are reported with a reduced weight.
+    """
     if fetch_result is None:
         return []
     html = getattr(fetch_result, "html", "") or ""
@@ -175,15 +185,16 @@ def analyze_behaviour(fetch_result) -> list[Signal]:
             hits.append(label)
     if _BASE64_BLOB.search(script_blob):
         hits.append("long base64 blob")
+    in_context = impersonating or bool(found_fields)
     if hits:
-        signals.append(Signal(name="obfuscated_js", weight=0.25,
+        signals.append(Signal(name="obfuscated_js", weight=0.25 if in_context else 0.05,
                               detail="Obfuscated/eval'd inline JS: " + ", ".join(sorted(set(hits)))))
 
     # --- 4) Credential-harvesting keywords in visible text ---
     low_text = collector.text.lower()
     harvest_hits = [w for w in _HARVEST_WORDS if w in low_text]
     if harvest_hits:
-        signals.append(Signal(name="credential_harvesting_text", weight=0.2,
+        signals.append(Signal(name="credential_harvesting_text", weight=0.2 if in_context else 0.1,
                               detail="Credential-harvesting prompts: " + ", ".join(harvest_hits[:5])))
 
     return signals

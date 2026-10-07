@@ -1,26 +1,33 @@
-"""Visual + structural similarity engine (lightweight, offline, deterministic).
+"""Visual + structural similarity engine.
 
-Matches a fetched page against a small checked-in brand reference index. The design
-intentionally avoids heavy ML (NO CLIP/open_clip/faiss/GPU). Two complementary paths:
+Matches a fetched page against genuine brand references. No ML models or GPU are
+required; image fingerprints come from ``app.services.imaging`` (Pillow + numpy).
 
-1. Perceptual-hash path (preferred when an image is available): compute an average-hash
-   (aHash) over a favicon/screenshot image and compare its Hamming distance to the
-   brand's expected hash(es). Implemented with Pillow ONLY when an image is supplied
-   AND Pillow is importable; otherwise it is skipped. Pure favicon-hash equality is also
-   honoured (the fetcher already produces a stable favicon_hash entity).
+Evidence paths, strongest first:
 
-2. Structural/text fallback (always available, pure-python): title keyword match plus a
-   token/shingle Jaccard similarity over the page's visible text against the brand's
-   reference vocabulary and DOM markers. This runs with no network and no images.
+1. **Screenshot similarity** - the rendered page's pHash/dHash is compared with
+   screenshots of the genuine brand site (``app/data/brand_refs.json``, built by
+   ``python -m app.tools.build_brand_refs``). Measured on the committed library,
+   different brands never exceed 0.62 layout similarity while re-encoded, cropped or
+   banner-modified copies of a brand page stay at or above 0.86.
+2. **Favicon reuse** - an exact favicon hash match, or a perceptual favicon match that
+   survives re-encoding and resizing.
+3. **Structural/text similarity** - title keywords, vocabulary Jaccard and DOM markers
+   (always available, no images needed).
 
-compare_visual(fetch_result, brand) -> (similarity: float in 0..1, signals: list[Signal]).
-Returns (0.0, []) when fetch_result is empty (no html and no favicon).
+``compare_visual(fetch_result, brand)`` scores a page against a known brand.
+``identify_brand(fetch_result)`` searches *all* brands, which catches clones hosted
+on domains that do not mention the brand at all (a common evasion tactic).
 """
+import json
 import logging
 import re
+from functools import lru_cache
 from html.parser import HTMLParser
+from pathlib import Path
 
 from app.schemas import Signal
+from app.services import imaging
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +109,87 @@ BRAND_INDEX: dict[str, dict] = {
         "ahash": None,
     },
 }
+
+# Brand keys that share a reference entry.
+_BRAND_ALIASES = {"googlepay": "gpay"}
+
+REFS_PATH = Path(__file__).resolve().parent.parent / "data" / "brand_refs.json"
+
+# Thresholds derived from the committed reference library (see module docstring).
+SCREENSHOT_STRONG = 0.85
+SCREENSHOT_MODERATE = 0.75
+FAVICON_PERCEPTUAL = 0.90
+
+
+@lru_cache(maxsize=1)
+def brand_references() -> dict[str, dict]:
+    """Load the screenshot/favicon reference library (empty when absent)."""
+    try:
+        return json.loads(REFS_PATH.read_text(encoding="utf-8")).get("brands", {})
+    except Exception as exc:  # noqa: BLE001 - the engine still works on structure alone
+        logger.warning("visual: brand reference library unavailable: %s", exc)
+        return {}
+
+
+def _ref_key(brand: str | None) -> str:
+    return _BRAND_ALIASES.get(brand or "", brand or "")
+
+
+def known_favicon_hashes(brand: str | None) -> set[str]:
+    key = _ref_key(brand)
+    hashes = set(BRAND_INDEX.get(brand or "", {}).get("favicon_hashes", []))
+    hashes |= set(BRAND_INDEX.get(key, {}).get("favicon_hashes", []))
+    hashes |= set(brand_references().get(key, {}).get("favicon_md5", []))
+    return hashes
+
+
+def screenshot_similarity(shot: imaging.Fingerprint | None, brand: str) -> tuple[float, str | None]:
+    """Best layout similarity between a screenshot fingerprint and a brand's references."""
+    best, where = 0.0, None
+    for ref in brand_references().get(_ref_key(brand), {}).get("screenshots", []):
+        sim = imaging.layout_similarity(shot, imaging.Fingerprint.from_dict(ref))
+        if sim > best:
+            best, where = sim, f"{ref.get('url')} ({ref.get('viewport')})"
+    return best, where
+
+
+def favicon_perceptual_similarity(favicon_phash: str | None, brand: str) -> float:
+    refs = brand_references().get(_ref_key(brand), {}).get("favicon_phash", [])
+    return max((imaging.hash_similarity(favicon_phash, r) for r in refs), default=0.0)
+
+
+def _page_fingerprints(fetch_result) -> tuple[imaging.Fingerprint | None, str | None]:
+    shot = getattr(fetch_result, "screenshot", None)
+    icon = getattr(fetch_result, "favicon_bytes", None)
+    return imaging.Fingerprint.of(shot), (imaging.phash(icon) if icon else None)
+
+
+def identify_brand(fetch_result, exclude: set[str] | None = None) -> tuple[str | None, float, list[Signal]]:
+    """Find which genuine brand a page looks like, regardless of its URL.
+
+    Returns ``(brand, similarity, signals)``; ``brand`` is None when nothing matches
+    strongly enough. Only screenshot and perceptual-favicon evidence is used here,
+    because page text alone is too weak to attribute an unbranded URL to a brand.
+    """
+    if fetch_result is None:
+        return None, 0.0, []
+    shot, icon_phash = _page_fingerprints(fetch_result)
+    exclude = exclude or set()
+    best: tuple[str | None, float, str] = (None, 0.0, "")
+    for key in brand_references():
+        if key in exclude:
+            continue
+        sim, where = screenshot_similarity(shot, key)
+        if sim > best[1]:
+            best = (key, sim, f"screenshot is {sim:.0%} similar to genuine {key} page {where}")
+        fav = favicon_perceptual_similarity(icon_phash, key)
+        if fav >= FAVICON_PERCEPTUAL and fav > best[1]:
+            best = (key, fav, f"favicon is {fav:.0%} perceptually similar to the genuine {key} icon")
+    brand, sim, detail = best
+    if brand is None or sim < SCREENSHOT_STRONG:
+        return None, round(sim, 3), []
+    return brand, round(sim, 3), [Signal(name="visual_brand_impersonation", weight=0.5, detail=detail)]
+
 
 # Weight split between the structural components when no image is available.
 _TITLE_WEIGHT = 0.4
@@ -223,8 +311,9 @@ def compare_visual(fetch_result, brand: str | None,
 
     html = getattr(fetch_result, "html", "") or ""
     favicon_hash = getattr(fetch_result, "favicon_hash", None)
+    has_images = bool(getattr(fetch_result, "screenshot", None) or getattr(fetch_result, "favicon_bytes", None))
 
-    if not html and not favicon_hash and not favicon_image:
+    if not html and not favicon_hash and not favicon_image and not has_images:
         return 0.0, []
 
     ref = BRAND_INDEX.get(brand or "")
@@ -235,11 +324,30 @@ def compare_visual(fetch_result, brand: str | None,
     signals: list[Signal] = []
     scores: list[float] = []
 
+    # 0) Rendered screenshot vs genuine brand screenshots.
+    shot, icon_phash = _page_fingerprints(fetch_result)
+    if shot is not None:
+        sim, where = screenshot_similarity(shot, brand)
+        if sim:
+            scores.append(sim)
+        if sim >= SCREENSHOT_STRONG:
+            signals.append(Signal(name="visual_screenshot_match", weight=0.45,
+                                  detail=f"Rendered page is {sim:.0%} similar to genuine {brand} page {where}"))
+        elif sim >= SCREENSHOT_MODERATE:
+            signals.append(Signal(name="visual_screenshot_resemblance", weight=0.25,
+                                  detail=f"Rendered page is {sim:.0%} similar to genuine {brand} page {where}"))
+
     # 1) Exact favicon-hash reuse: strongest visual signal (clone copied the logo).
-    if favicon_hash and favicon_hash in ref["favicon_hashes"]:
+    if favicon_hash and favicon_hash in known_favicon_hashes(brand):
         scores.append(1.0)
         signals.append(Signal(name="favicon_match", weight=0.4,
                               detail=f"Favicon hash matches genuine {brand} favicon"))
+    elif icon_phash:
+        fav = favicon_perceptual_similarity(icon_phash, brand)
+        if fav >= FAVICON_PERCEPTUAL:
+            scores.append(fav)
+            signals.append(Signal(name="favicon_visual_match", weight=0.35,
+                                  detail=f"Favicon is {fav:.0%} perceptually similar to the genuine {brand} icon"))
 
     # 2) Perceptual-hash path when an image is supplied and the brand has a reference.
     if favicon_image and ref.get("ahash"):

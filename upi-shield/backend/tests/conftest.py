@@ -9,6 +9,7 @@ os.environ.setdefault("UPI_SHIELD_DB", ":memory:")
 os.environ.setdefault("UPI_SHIELD_EVIDENCE_DIR", os.path.join(os.path.dirname(__file__), ".evidence"))
 os.environ.setdefault("JOBS_INLINE", "1")
 os.environ.setdefault("SEED_DEMO", "1")
+os.environ.setdefault("RENDER_PAGES", "0")
 os.environ.pop("ANALYZE_FETCH", None)
 os.environ.pop("UPI_SHIELD_API_KEY", None)
 

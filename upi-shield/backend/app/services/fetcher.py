@@ -10,6 +10,7 @@ FetchResult (html='' and empty collections) and never raises.
 """
 import hashlib
 import logging
+import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
@@ -33,6 +34,13 @@ class FetchResult:
     favicon_href: str | None = None
     favicon_hash: str | None = None
     ok: bool = False
+    # Rendered-capture artefacts (Playwright path). Bytes are kept in memory for the
+    # visual engine; the screenshot is also written to the evidence store.
+    screenshot: bytes | None = field(default=None, repr=False)
+    favicon_bytes: bytes | None = field(default=None, repr=False)
+    screenshot_url: str | None = None
+    title: str = ""
+    user_agent: str = ""
 
 
 class _PageParser(HTMLParser):
@@ -93,78 +101,134 @@ def _host(url: str) -> str:
         return ""
 
 
-def _try_playwright(url: str, timeout: float) -> FetchResult | None:
-    """Optional Playwright render. Returns None if playwright/browser unavailable."""
+DESKTOP_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+              "(KHTML, like Gecko) Chrome/126.0 Safari/537.36")
+MOBILE_UA = ("Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 "
+             "(KHTML, like Gecko) Chrome/126.0 Mobile Safari/537.36")
+
+
+def save_evidence(data: bytes, suffix: str = "png") -> str | None:
+    """Persist an evidence artefact by content hash and return its API path."""
+    from app.config import get_settings
+
     try:
-        from playwright.sync_api import sync_playwright  # type: ignore
+        digest = hashlib.sha256(data).hexdigest()[:24]
+        directory = get_settings().evidence_dir
+        os.makedirs(directory, exist_ok=True)
+        path = os.path.join(directory, f"{digest}.{suffix}")
+        if not os.path.exists(path):
+            with open(path, "wb") as fh:
+                fh.write(data)
+        return f"/evidence/{digest}.{suffix}"
+    except OSError as exc:
+        logger.warning("fetcher: could not store evidence: %s", exc)
+        return None
+
+
+def _try_playwright(url: str, timeout: float, mobile: bool = False) -> FetchResult | None:
+    """Render the page in headless Chromium and capture a screenshot.
+
+    Returns None when Playwright or the browser is unavailable so the caller can
+    fall back to the plain HTTP fetch.
+    """
+    try:
+        from playwright.sync_api import sync_playwright
     except Exception:  # noqa: BLE001 - not installed; this is expected/normal
         return None
+    ua = MOBILE_UA if mobile else DESKTOP_UA
+    viewport = {"width": 390, "height": 844} if mobile else {"width": 1280, "height": 800}
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch()
-            page = browser.new_page()
-            resp = page.goto(url, timeout=timeout * 1000, wait_until="domcontentloaded")
-            html = page.content()
-            final_url = page.url
-            status = resp.status if resp else 0
-            browser.close()
-        forms, external, favicon = parse_html(html, final_url)
-        favicon_hash = None
-        try:
-            import httpx
-
-            with httpx.Client(follow_redirects=True, timeout=timeout,
-                              headers={"User-Agent": "upi-shield-fetcher/1.0"}) as client:
-                favicon_hash = _fetch_favicon_hash(client, final_url, favicon)
-        except Exception as exc:  # noqa: BLE001 - favicon optional
-            logger.debug("fetcher: playwright favicon fetch failed: %s", exc)
-        return FetchResult(url=url, final_url=final_url, redirect_chain=[url, final_url] if final_url != url else [url],
-                           status=status, html=html, forms=forms, external_script_srcs=external,
-                           favicon_href=favicon, favicon_hash=favicon_hash, ok=True)
+            try:
+                ctx = browser.new_context(user_agent=ua, viewport=viewport, is_mobile=mobile,
+                                          has_touch=mobile, locale="en-IN", ignore_https_errors=True)
+                page = ctx.new_page()
+                chain: list[str] = []
+                page.on("framenavigated", lambda f: f == page.main_frame and chain.append(f.url))
+                resp = page.goto(url, timeout=timeout * 1000, wait_until="domcontentloaded")
+                page.wait_for_timeout(1500)  # let client-side rendering settle
+                html = page.content()
+                final_url = page.url
+                title = page.title()
+                shot = page.screenshot()
+                status = resp.status if resp else 0
+                forms, external, favicon = parse_html(html, final_url)
+                icon_bytes = None
+                for href in [favicon, "/favicon.ico"]:
+                    if not href:
+                        continue
+                    try:
+                        r = page.request.get(urljoin(final_url, href), timeout=timeout * 1000)
+                        if r.ok and r.body():
+                            icon_bytes = r.body()
+                            break
+                    except Exception as exc:  # noqa: BLE001 - favicon optional
+                        logger.debug("fetcher: favicon fetch failed: %s", exc)
+            finally:
+                browser.close()
+        chain = list(dict.fromkeys([url, *[c for c in chain if c and c != "about:blank"], final_url]))
+        return FetchResult(url=url, final_url=final_url, redirect_chain=chain, status=status, html=html,
+                           forms=forms, external_script_srcs=external, favicon_href=favicon,
+                           favicon_hash=favicon_hash_of(icon_bytes) if icon_bytes else None,
+                           ok=True, screenshot=shot, favicon_bytes=icon_bytes,
+                           screenshot_url=save_evidence(shot), title=title, user_agent=ua)
     except Exception as exc:  # noqa: BLE001 - fall back to httpx
         logger.warning("fetcher: playwright render failed, falling back: %s", exc)
         return None
 
 
-def _fetch_favicon_hash(client, base_url: str, favicon_href: str | None) -> str | None:
-    """Best-effort favicon fetch -> stable hash, so the favicon-reuse visual signal and
-    favicon_hash linking entity actually fire on a real fetch. Falls back to the
-    conventional /favicon.ico when no <link rel=icon> was declared. Never raises;
-    returns None on any failure so the fetch degrades to html-only."""
+def _fetch_favicon(client, base_url: str, favicon_href: str | None) -> bytes | None:
+    """Best-effort favicon download. Falls back to the conventional /favicon.ico when no
+    <link rel=icon> was declared. Never raises; returns None on any failure."""
     href = favicon_href or "/favicon.ico"
     try:
-        fav_url = urljoin(base_url, href)
-        resp = client.get(fav_url)
+        resp = client.get(urljoin(base_url, href))
         if resp.status_code == 200 and resp.content:
-            return favicon_hash_of(resp.content)
+            return resp.content
     except Exception as exc:  # noqa: BLE001 - favicon is optional, must not break fetch
         logger.debug("fetcher: favicon fetch failed for %s: %s", href, exc)
     return None
 
 
-def _httpx_fetch(url: str, timeout: float) -> FetchResult:
+def _fetch_favicon_hash(client, base_url: str, favicon_href: str | None) -> str | None:
+    """Stable favicon hash, so the favicon-reuse signal and favicon_hash linking entity fire."""
+    data = _fetch_favicon(client, base_url, favicon_href)
+    return favicon_hash_of(data) if data else None
+
+
+def _httpx_fetch(url: str, timeout: float, user_agent: str = DESKTOP_UA) -> FetchResult:
     import httpx
 
-    with httpx.Client(follow_redirects=True, timeout=timeout,
-                      headers={"User-Agent": "upi-shield-fetcher/1.0"}) as client:
+    # A browser-like User-Agent: phishing kits commonly serve a decoy page to bot UAs.
+    # Certificate verification is disabled on purpose: phishing hosts frequently use
+    # self-signed or mismatched certificates, and we only read the page, never submit.
+    with httpx.Client(follow_redirects=True, timeout=timeout, verify=False,
+                      headers={"User-Agent": user_agent, "Accept-Language": "en-IN,en;q=0.9"}) as client:
         resp = client.get(url)
         chain = [str(h.url) for h in resp.history] + [str(resp.url)]
         html = resp.text
         forms, external, favicon = parse_html(html, str(resp.url))
-        favicon_hash = _fetch_favicon_hash(client, str(resp.url), favicon)
+        icon = _fetch_favicon(client, str(resp.url), favicon)
         return FetchResult(url=url, final_url=str(resp.url), redirect_chain=chain,
                            status=resp.status_code, html=html, forms=forms,
                            external_script_srcs=external, favicon_href=favicon,
-                           favicon_hash=favicon_hash, ok=True)
+                           favicon_hash=favicon_hash_of(icon) if icon else None, ok=True,
+                           favicon_bytes=icon, user_agent=user_agent)
 
 
-def fetch(url: str, timeout: float = DEFAULT_TIMEOUT, use_playwright: bool = False,
+def fetch(url: str, timeout: float = DEFAULT_TIMEOUT, use_playwright: bool | None = None,
           fetch_fn: Callable[[str, float], FetchResult] | None = None) -> FetchResult:
     """Fetch a URL best-effort. Never raises; returns typed-empty FetchResult on failure.
 
-    `fetch_fn` is injectable for tests (bypasses all network). `use_playwright` opts into
-    the optional render path which still falls back to httpx when unavailable.
+    ``fetch_fn`` is injectable for tests (bypasses all network). ``use_playwright``
+    defaults to the ``RENDER_PAGES`` setting; the render path captures a screenshot
+    and falls back to the plain HTTP fetch when no browser is available.
     """
+    if use_playwright is None:
+        from app.config import get_settings
+
+        use_playwright = get_settings().render_pages
     if fetch_fn is not None:
         try:
             return fetch_fn(url, timeout)

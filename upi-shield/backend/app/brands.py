@@ -35,7 +35,7 @@ BRANDS: dict[str, Brand] = {b.key: b for b in [
           frozenset({"google.com", "gpay.app", "pay.google.com"}),
           ("google llc",),
           ("com.google.android.apps.nbu.paisa.user",),
-          ("https://pay.google.com/",)),
+          ("https://pay.google.com/intl/en_in/about/", "https://pay.google.com/about/")),
     Brand("paytm", "Paytm", ("paytm",),
           frozenset({"paytm.com", "paytm.in", "paytmbank.com", "paytmpayments.com", "paytmpayments.in",
                      "paytmmoney.com", "paytminsurance.co.in", "paytm.bank.in", "paytmmall.com"}),
@@ -53,12 +53,12 @@ BRANDS: dict[str, Brand] = {b.key: b for b in [
                      "sbicard.com", "yonosbi.com", "yonosbi.sbi"}),
           ("state bank of india",),
           ("com.sbi.lotusintouch", "com.sbi.SBIFreedomPlus"),
-          ("https://www.onlinesbi.sbi/",)),
+          ("https://www.onlinesbi.sbi/", "https://retail.onlinesbi.sbi/retail/login.htm")),
     Brand("hdfc", "HDFC Bank", ("hdfc",),
           frozenset({"hdfcbank.com", "hdfc.bank.in", "hdfcbank.bank.in", "hdfc.com", "hdfcbank.net"}),
           ("hdfc bank limited",),
           ("com.snapwork.hdfc",),
-          ("https://www.hdfcbank.com/",)),
+          ("https://www.hdfcbank.com/", "https://www.hdfcbank.com/personal")),
     Brand("icici", "ICICI Bank", ("icici",),
           frozenset({"icicibank.com", "icici.bank.in", "icicibank.co.in", "icicidirect.com"}),
           ("icici bank limited",),
@@ -84,6 +84,14 @@ def keyword_index() -> dict[str, str]:
 def is_official(brand_key: str, registered_domain: str) -> bool:
     brand = BRANDS.get(brand_key)
     return bool(brand and registered_domain in brand.official_domains)
+
+
+def official_brand_for(registered_domain: str) -> str | None:
+    """Return the brand that owns ``registered_domain``, if any."""
+    for brand in BRANDS.values():
+        if registered_domain in brand.official_domains:
+            return brand.key
+    return None
 
 
 def brand_for_legal_entity(text: str) -> str | None:

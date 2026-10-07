@@ -53,6 +53,8 @@ entities, incremented `sightings`, refreshed `last_seen`) instead of duplicating
 |----------|---------|---------|
 | `UPI_SHIELD_DB` | `backend/data/upi_shield.db` | SQLite path (`:memory:` for an ephemeral store) |
 | `ANALYZE_FETCH` | `0` | Fetch pages live and run enrichment (network) |
+| `RENDER_PAGES` | `1` | Render with headless Chromium and capture screenshots when fetching |
+| `UPI_SHIELD_EVIDENCE_DIR` | `backend/data/evidence` | Where screenshots are stored |
 | `SEED_DEMO` | `1` | Seed demo campaigns when the store is empty |
 | `JOB_WORKERS` | `4` | Background worker threads |
 | `CRAWL_KEYWORDS` | monitored brands | Comma-separated CT search keywords |
@@ -65,13 +67,28 @@ entities, incremented `sightings`, refreshed `last_seen`) instead of duplicating
 1. **URL features** (`services/url_features.py`) — lexical scoring on every URL:
    brand-in-unofficial-domain, homoglyph normalisation, suspicious TLDs, punycode,
    lure keywords, raw-IP hosts. Always on, no network.
-2. **Visual / structural similarity** (`services/visual.py`) — lightweight,
-   offline. Favicon-hash reuse + perceptual aHash (Pillow, optional) when an image
-   is available, otherwise a pure-python title/vocabulary/DOM-marker comparison
-   against a small brand index.
+2. **Visual similarity** (`services/visual.py`, `services/imaging.py`) — pages are
+   rendered in headless Chromium (desktop viewport) and the screenshot is fingerprinted
+   with a DCT perceptual hash, a gradient hash and a brand-colour histogram (Pillow +
+   numpy, no ML models). Fingerprints are compared with screenshots and favicons of the
+   genuine brand sites in `app/data/brand_refs.json`. Because the comparison does not
+   depend on the URL, a clone hosted on an unbranded domain is still attributed to the
+   brand it imitates. On the committed library, different brands never exceed 0.63
+   screenshot similarity, while re-encoded, cropped or banner-modified copies of a
+   brand page score at least 0.86 (match threshold: 0.85). Title, vocabulary and DOM
+   markers provide a structural fallback when no screenshot is available. Screenshots
+   are stored as evidence and served from `GET /evidence/{name}`.
+
+   Rebuild the reference library after a brand redesign:
+
+       playwright install chromium
+       python -m app.tools.build_brand_refs            # or --brand phonepe
+
 3. **Behaviour** (`services/behaviour.py`) — flags credential-harvesting DOMs:
    UPI PIN/OTP/CVV/card inputs, cross-domain form actions, obfuscated inline JS,
-   credential-harvesting text.
+   credential-harvesting prompts. Obfuscation and prompts carry full weight only in a
+   phishing context (credential inputs present or brand impersonation detected), and
+   pages whose final URL is on a brand-owned domain are never penalised.
 4. **Enrichment** (`services/enrichment.py`) — resolves host -> ip/asn/cert/registrar
    and scrapes analytics IDs. Each lookup is an injectable resolver; defaults use the
    network but return `None` on failure, so the stage degrades gracefully offline.
