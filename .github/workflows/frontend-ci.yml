@@ -1,0 +1,59 @@
+name: Frontend CI
+
+on:
+  pull_request:
+    paths:
+      - "upi-shield/frontend/**"
+      - ".github/workflows/frontend-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "upi-shield/frontend/**"
+      - ".github/workflows/frontend-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: frontend-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: upi-shield/frontend
+
+jobs:
+  check:
+    name: Typecheck, lint, test and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: upi-shield/frontend/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
+  docker:
+    name: Dashboard Docker build
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t upi-shield-dashboard:ci .
+      - name: Smoke test the app shell and client-side routes
+        run: |
+          docker network create shield
+          # A stand-in "api" host so nginx can resolve its upstream at start-up.
+          docker run -d --name api --network shield --network-alias api nginx:1.27-alpine
+          docker run -d --name dashboard --network shield -p 8080:8080 upi-shield-dashboard:ci
+          for i in $(seq 1 20); do curl -fsS http://localhost:8080/ >/dev/null && break; sleep 1; done
+          curl -fsS http://localhost:8080/ | grep -q '<div id="root">'
+          curl -fsS http://localhost:8080/campaigns/deep-link | grep -q '<div id="root">'
+          docker rm -f dashboard api

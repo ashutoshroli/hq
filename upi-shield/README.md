@@ -30,7 +30,9 @@ infrastructure behind them into campaigns, and drives takedowns to completion.
     python -m eval.campaign_demo         # offline clustering + takedown demo
     python -m eval.live_demo --limit 30  # live end-to-end run (network)
 
-Or with Docker: `docker compose up --build` (set `ANALYZE_FETCH=1` for live analysis).
+Or with Docker: `docker compose up --build`, which serves the API on :8000 and the
+**analyst dashboard on http://localhost:8080** (set `ANALYZE_FETCH=1` for live analysis).
+The dashboard lives in `frontend/` (see `frontend/README.md`).
 
 Demo data (two campaigns) is seeded on first start when the store is empty. Data is
 persisted to `backend/data/upi_shield.db` (override with `UPI_SHIELD_DB`). The default
@@ -317,5 +319,5 @@ often before the page goes live.
 * **Unverified contacts are not guessed.** Brand phishing-report addresses are
   included only where published on the brand's own site (ICICI, HDFC); other brands
   show `lookup_required`.
-* **No dashboard UI in this repository.** The API is the dashboard backend; the
-  frontend is a separate deliverable.
+* **Dashboard in progress.** The `frontend/` dashboard currently provides the overview
+  and settings pages; detections, ingestion, campaigns and takedown screens follow.
