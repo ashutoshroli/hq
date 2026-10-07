@@ -182,6 +182,32 @@ def bot_challenge(fetch_result) -> Signal | None:
                   detail=f"Page is behind an anti-bot challenge ({hit}); content may be hidden from scanners")
 
 
+# Error and suspension pages served by hosting platforms after a takedown.
+_OFFLINE_MARKERS = ("deployment_disabled", "this deployment is unavailable", "deployment_not_found", "site not found",
+                    "this site has been suspended", "account has been suspended", "this account has been suspended",
+                    "website is no longer available", "page not found", "404 not found", "no such app",
+                    "there isn't a github pages site here", "this site can't be reached", "domain has expired",
+                    "this domain is parked", "web site currently not available")
+
+
+def offline_reason(fetch_result) -> str | None:
+    """Why a fetched page should be treated as offline (taken down), or None if it is live."""
+    if fetch_result is None:
+        return None
+    if not getattr(fetch_result, "ok", False):
+        return "unreachable (DNS or connection failure)"
+    status = getattr(fetch_result, "status", 0) or 0
+    if status in (404, 410, 451) or status >= 500:
+        return f"HTTP {status}"
+    html = (getattr(fetch_result, "html", "") or "")[:20000].lower()
+    title = (getattr(fetch_result, "title", "") or "").lower()
+    visible = _visible_tokens(html)
+    marker = next((m for m in _OFFLINE_MARKERS if m in title or m in html), None)
+    if marker and len(visible) < 150:
+        return f"platform error page ('{marker}')"
+    return None
+
+
 def detect_cloaking(victim, crawler, registered_domain) -> Signal | None:
     """Compare the page a mobile victim receives with what a search-engine crawler gets.
 

@@ -347,7 +347,8 @@ def summary(cands: list[Candidate], campaigns: list[Campaign], cases: list[Taked
     return {
         "generated_at": now.isoformat(),
         "totals": {"candidates": len(cands), "flagged": len(flagged), "campaigns": len(campaigns),
-                   "apps": sum(c.kind == "app" for c in flagged)},
+                   "apps": sum(c.kind == "app" for c in flagged),
+                   "live": sum(c.live is True for c in flagged), "offline": sum(c.live is False for c in flagged)},
         "verdicts": dict(Counter(c.verdict for c in cands)),
         "review": dict(Counter(c.review_status for c in cands)),
         "sources": dict(Counter(c.source for c in flagged)),
