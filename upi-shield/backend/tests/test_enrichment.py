@@ -62,8 +62,23 @@ def test_enrich_never_raises_when_resolvers_throw():
 
 def test_scrape_analytics_ids_dedupes_and_ignores_empty():
     assert enrichment.scrape_analytics_ids("") == []
-    html = "G-ABCDEF G-ABCDEF GTM-WXYZ UA-1234-7"
-    assert enrichment.scrape_analytics_ids(html) == ["G-ABCDEF", "GTM-WXYZ", "UA-1234-7"]
+    # G-/GTM- IDs are only picked up inside a tracking context (quotes, '=', gtag/config
+    # calls); UA- IDs are distinctive enough to match in prose too. Duplicates collapse.
+    html = (
+        "<script>gtag('config','G-ABCDEF1234');gtag('config','G-ABCDEF1234');</script>"
+        '<script src="https://www.googletagmanager.com/gtag/js?id=GTM-WXYZ99"></script>'
+        "UA-1234-7"
+    )
+    assert enrichment.scrape_analytics_ids(html) == ["G-ABCDEF1234", "GTM-WXYZ99", "UA-1234-7"]
+
+
+def test_scrape_analytics_ids_ignores_bare_uppercase_prose():
+    """A strong clustering link must not fire on stray uppercase words in page copy."""
+    html = "<p>Our G-SERIES phones and the GTM-PLAYBOOK are great. Visit now!</p>"
+    assert enrichment.scrape_analytics_ids(html) == []
+    # But a genuine gtag call in the same page is still captured.
+    html2 = html + "<script>gtag('config', 'G-REALID9876');</script>"
+    assert enrichment.scrape_analytics_ids(html2) == ["G-REALID9876"]
 
 
 # --- clustering with enriched entities ------------------------------------------
@@ -133,6 +148,34 @@ def test_report_degrades_when_relevant_entities_absent():
     rep = takedown.generate(camps[0], cands, "bank")
     assert "Reported URLs" in rep.body
     assert "(none available)" in rep.body
+
+
+def test_registrar_report_lists_member_domains():
+    # registrar context must list the per-member domains (read from members, since
+    # 'domain' is unique per candidate and never a shared entity).
+    ip = Entity(type="ip", value="198.51.100.5")
+    cands = [
+        _cand("a", "http://a.example/login", "a.example", [ip]),
+        _cand("b", "http://b.example/pay", "b.example", [ip]),
+    ]
+    camps = clustering.build_campaigns(cands)
+    rep = takedown.generate(camps[0], cands, "registrar")
+    assert "domain: a.example" in rep.body
+    assert "domain: b.example" in rep.body
+    assert "Reported URLs" in rep.body
+
+
+def test_cert_in_report_lists_member_domains_and_shared_entities():
+    ip = Entity(type="ip", value="198.51.100.5")
+    cands = [
+        _cand("a", "http://a.example/login", "a.example", [ip]),
+        _cand("b", "http://b.example/pay", "b.example", [ip]),
+    ]
+    camps = clustering.build_campaigns(cands)
+    rep = takedown.generate(camps[0], cands, "cert_in")
+    assert "domain: a.example" in rep.body
+    assert "domain: b.example" in rep.body
+    assert "198.51.100.5" in rep.body  # shared ip still surfaced
 
 
 def test_safe_browsing_lists_all_urls():

@@ -39,3 +39,51 @@ def test_pipeline_without_fetch_leaves_visual_none():
     cand = pipeline.analyze_url("http://ph0nepe-kyc-verify.xyz/login", source="user_report")
     assert cand.visual_similarity is None
     assert 0.0 <= cand.risk_score <= 1.0
+
+
+def test_default_path_is_offline_no_fetch_no_enrich(monkeypatch):
+    """With ANALYZE_FETCH unset and do_fetch=None, the default analyze_url path must NOT
+    invoke the network fetcher or enrichment resolvers (the offline guarantee)."""
+    from app.services import enrichment, fetcher
+
+    # Force the module-level flag OFF regardless of the ambient environment.
+    monkeypatch.setattr(pipeline, "ANALYZE_FETCH", False)
+
+    def _boom_fetch(*args, **kwargs):
+        raise AssertionError("fetcher.fetch must not be called on the offline default path")
+
+    def _boom_enrich(*args, **kwargs):
+        raise AssertionError("enrichment.enrich must not be called on the offline default path")
+
+    monkeypatch.setattr(fetcher, "fetch", _boom_fetch)
+    monkeypatch.setattr(enrichment, "enrich", _boom_enrich)
+
+    cand = pipeline.analyze_url("http://phonepe-kyc-verify.xyz/login", source="user_report")
+    # Lexical-only result: no visual similarity, no network-derived entities.
+    assert cand.visual_similarity is None
+    assert all(e.type in {"domain"} or e.type == "domain" for e in cand.entities)
+    entity_types = {e.type for e in cand.entities}
+    assert entity_types <= {"domain"}
+
+
+def test_env_flag_enables_fetch(monkeypatch):
+    """When ANALYZE_FETCH is on and do_fetch is left None, the fetcher IS consulted."""
+    from app.services import enrichment, fetcher
+
+    monkeypatch.setattr(pipeline, "ANALYZE_FETCH", True)
+    calls = {"fetch": 0, "enrich": 0}
+
+    def _stub_fetch(url, *a, **k):
+        calls["fetch"] += 1
+        return FetchResult(url=url, ok=False)
+
+    def _stub_enrich(host, *a, **k):
+        calls["enrich"] += 1
+        return []
+
+    monkeypatch.setattr(fetcher, "fetch", _stub_fetch)
+    monkeypatch.setattr(enrichment, "enrich", _stub_enrich)
+
+    pipeline.analyze_url("http://phonepe-kyc-verify.xyz/login", source="user_report")
+    assert calls["fetch"] == 1
+    assert calls["enrich"] == 1

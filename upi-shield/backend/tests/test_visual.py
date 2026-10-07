@@ -53,6 +53,17 @@ def test_favicon_hash_match_is_strong(monkeypatch):
     assert any(s.name == "favicon_match" for s in signals)
 
 
+def test_seeded_brand_favicon_hash_fires_without_injection():
+    """A seeded genuine-brand favicon hash must trip favicon_match, so the reuse path
+    is reachable from a real fetch (fetcher now computes favicon_hash)."""
+    seeded = visual.BRAND_INDEX["phonepe"]["favicon_hashes"]
+    assert seeded, "at least one genuine brand favicon hash must be catalogued"
+    res = _result("<title>PhonePe</title>", favicon_hash=seeded[0])
+    sim, signals = visual.compare_visual(res, "phonepe")
+    assert sim == 1.0
+    assert any(s.name == "favicon_match" for s in signals)
+
+
 def test_hamming_similarity_bounds():
     assert visual.hamming_similarity("ffff", "ffff") == 1.0
     assert visual.hamming_similarity("0000", "ffff") == 0.0

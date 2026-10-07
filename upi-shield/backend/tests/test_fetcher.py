@@ -63,6 +63,48 @@ def test_favicon_hash_is_stable():
     assert fetcher.favicon_hash_of(b"abc") != fetcher.favicon_hash_of(b"xyz")
 
 
+class _FakeResp:
+    def __init__(self, status_code, content):
+        self.status_code = status_code
+        self.content = content
+
+
+class _FakeClient:
+    """Minimal stand-in for httpx.Client exposing just .get(url). No network."""
+    def __init__(self, favicon_bytes=b"\x00icon-bytes", status=200):
+        self._favicon_bytes = favicon_bytes
+        self._status = status
+        self.requested: list[str] = []
+
+    def get(self, url):
+        self.requested.append(url)
+        return _FakeResp(self._status, self._favicon_bytes)
+
+
+def test_fetch_favicon_hash_computes_from_declared_href():
+    client = _FakeClient(favicon_bytes=b"phonepe-logo-bytes")
+    h = fetcher._fetch_favicon_hash(client, "http://clone.xyz/login", "/favicon.ico")
+    assert h == fetcher.favicon_hash_of(b"phonepe-logo-bytes")
+    assert client.requested == ["http://clone.xyz/favicon.ico"]
+
+
+def test_fetch_favicon_hash_defaults_to_conventional_path():
+    client = _FakeClient(favicon_bytes=b"xyz")
+    fetcher._fetch_favicon_hash(client, "http://clone.xyz/pay/login", None)
+    # Falls back to /favicon.ico when no <link rel=icon> was declared.
+    assert client.requested == ["http://clone.xyz/favicon.ico"]
+
+
+def test_fetch_favicon_hash_returns_none_on_non_200_or_error():
+    assert fetcher._fetch_favicon_hash(_FakeClient(status=404), "http://x.test/", "/f.ico") is None
+
+    class _Boom:
+        def get(self, url):
+            raise RuntimeError("network down")
+
+    assert fetcher._fetch_favicon_hash(_Boom(), "http://x.test/", "/f.ico") is None
+
+
 def test_telegram_extraction_offline():
     from app.services import extractor
     out = extractor.extract("join https://t.me/fakepaygroup or dm @supportdesk now")

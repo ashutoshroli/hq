@@ -109,12 +109,37 @@ def _try_playwright(url: str, timeout: float) -> Optional[FetchResult]:
             status = resp.status if resp else 0
             browser.close()
         forms, external, favicon = parse_html(html, final_url)
+        favicon_hash = None
+        try:
+            import httpx
+
+            with httpx.Client(follow_redirects=True, timeout=timeout,
+                              headers={"User-Agent": "upi-shield-fetcher/1.0"}) as client:
+                favicon_hash = _fetch_favicon_hash(client, final_url, favicon)
+        except Exception as exc:  # noqa: BLE001 - favicon optional
+            logger.debug("fetcher: playwright favicon fetch failed: %s", exc)
         return FetchResult(url=url, final_url=final_url, redirect_chain=[url, final_url] if final_url != url else [url],
                            status=status, html=html, forms=forms, external_script_srcs=external,
-                           favicon_href=favicon, ok=True)
+                           favicon_href=favicon, favicon_hash=favicon_hash, ok=True)
     except Exception as exc:  # noqa: BLE001 - fall back to httpx
         logger.warning("fetcher: playwright render failed, falling back: %s", exc)
         return None
+
+
+def _fetch_favicon_hash(client, base_url: str, favicon_href: Optional[str]) -> Optional[str]:
+    """Best-effort favicon fetch -> stable hash, so the favicon-reuse visual signal and
+    favicon_hash linking entity actually fire on a real fetch. Falls back to the
+    conventional /favicon.ico when no <link rel=icon> was declared. Never raises;
+    returns None on any failure so the fetch degrades to html-only."""
+    href = favicon_href or "/favicon.ico"
+    try:
+        fav_url = urljoin(base_url, href)
+        resp = client.get(fav_url)
+        if resp.status_code == 200 and resp.content:
+            return favicon_hash_of(resp.content)
+    except Exception as exc:  # noqa: BLE001 - favicon is optional, must not break fetch
+        logger.debug("fetcher: favicon fetch failed for %s: %s", href, exc)
+    return None
 
 
 def _httpx_fetch(url: str, timeout: float) -> FetchResult:
@@ -126,9 +151,11 @@ def _httpx_fetch(url: str, timeout: float) -> FetchResult:
         chain = [str(h.url) for h in resp.history] + [str(resp.url)]
         html = resp.text if "text/html" in resp.headers.get("content-type", "") or not resp.headers.get("content-type") else resp.text
         forms, external, favicon = parse_html(html, str(resp.url))
+        favicon_hash = _fetch_favicon_hash(client, str(resp.url), favicon)
         return FetchResult(url=url, final_url=str(resp.url), redirect_chain=chain,
                            status=resp.status_code, html=html, forms=forms,
-                           external_script_srcs=external, favicon_href=favicon, ok=True)
+                           external_script_srcs=external, favicon_href=favicon,
+                           favicon_hash=favicon_hash, ok=True)
 
 
 def fetch(url: str, timeout: float = DEFAULT_TIMEOUT, use_playwright: bool = False,

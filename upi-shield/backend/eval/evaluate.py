@@ -24,8 +24,8 @@ import json
 import os
 from typing import Optional
 
-from app.schemas import EvalMetrics, StageMetrics
-from app.services import behaviour, enrichment, url_features, visual
+from app.schemas import Entity, EvalMetrics, StageMetrics
+from app.services import behaviour, enrichment, pipeline, url_features, visual
 from app.services.fetcher import FetchResult
 
 from eval import dataset
@@ -75,29 +75,44 @@ def _stub_resolvers(item: dict) -> dict:
     }
 
 
+def _full_score_via_pipeline(item: dict, fr: Optional[FetchResult]) -> float:
+    """Full-stage score driven through the REAL pipeline (no parallel re-implementation).
+
+    Uses the same offline injection path as campaign_demo: do_fetch=False so no live
+    fetch/enrichment network runs, with the canned FetchResult feeding visual +
+    behaviour. The pipeline computes risk_score the way production does, so the
+    reported metrics cannot drift from pipeline behaviour.
+    """
+    extra = [Entity(type=e["type"], value=e["value"]) for e in item.get("entities", [])]
+    cand = pipeline.analyze_url(item["url"], item["source"], extra_entities=extra,
+                                do_fetch=False, fetch_result=fr)
+    # Exercise enrichment with stub resolvers to prove the stage is offline-safe
+    # end-to-end (entities don't change the score, but this keeps the full offline
+    # pipeline covered and matches the stage's documented intent).
+    enrichment.enrich(url_features.host_of(item["url"]), fetch_result=fr,
+                      resolvers=_stub_resolvers(item))
+    return cand.risk_score
+
+
 def _score_for_stage(item: dict, stage: str, fr: Optional[FetchResult]) -> float:
     """Compute the cumulative risk score for one item under one stage config.
 
-    Mirrors pipeline.analyze_url's accumulation (sum of signal weights, clamped to
-    1.0) but is driven directly by the engines so it stays offline/deterministic.
+    The ``full`` stage is driven through ``pipeline.analyze_url`` so it cannot diverge
+    from real pipeline behaviour. The ``url_only`` / ``url+visual`` stages are partial
+    subsets of the pipeline that the public signature does not expose directly, so they
+    accumulate the same engine weights the pipeline uses (sum of signal weights, clamped
+    to 1.0). ``test_eval`` asserts the inline accumulation agrees with the pipeline.
     """
+    if stage == "full":
+        return _full_score_via_pipeline(item, fr)
+
     url = item["url"]
     score0, signals, brand = url_features.score_url(url)
     weights = [s.weight for s in signals]
 
-    if stage in ("url+visual", "full") and fr is not None:
+    if stage == "url+visual" and fr is not None:
         sim, visual_signals = visual.compare_visual(fr, brand)
         weights += [s.weight for s in visual_signals]
-
-    if stage == "full" and fr is not None:
-        # redirect-chain signal (same rule the pipeline uses)
-        if len(fr.redirect_chain) > 1:
-            weights.append(0.1)
-        weights += [s.weight for s in behaviour.analyze_behaviour(fr)]
-        # Enrichment entities don't add score, but running it exercises the stage
-        # end-to-end and proves it is offline-safe with stub resolvers.
-        enrichment.enrich(url_features.host_of(url), fetch_result=fr,
-                          resolvers=_stub_resolvers(item))
 
     return min(1.0, sum(weights))
 

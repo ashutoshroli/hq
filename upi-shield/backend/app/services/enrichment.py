@@ -22,7 +22,19 @@ logger = logging.getLogger(__name__)
 
 # Tracking / analytics IDs commonly embedded in cloned pages. Shared IDs are a
 # strong campaign-linking signal (clones reuse the attacker's analytics account).
-_ANALYTICS_RE = re.compile(r"\b((?:UA-\d{4,}-\d+)|(?:G-[A-Z0-9]{6,})|(?:GTM-[A-Z0-9]{4,}))\b")
+#
+# Because analytics_id is a STRONG clustering link, the match is tightened to avoid
+# over-matching stray uppercase tokens in visible prose (which could spuriously merge
+# unrelated pages into a campaign):
+#   * UA-xxxxxxx-n : classic Universal Analytics IDs are already distinctive (digits +
+#     a hyphenated suffix) and rarely occur in prose, so they match on word boundaries.
+#   * G-xxxxxxxxxx / GTM-xxxxxxx : these look like ordinary uppercase words, so they are
+#     only accepted inside a tracking CONTEXT delimiter — a quote, '=', ':', '/', '(' or
+#     ',' before and a quote, '<', '&', ')', ';', whitespace or end-of-string after.
+#     That matches gtag()/googletagmanager script and config usages while rejecting a
+#     bare "G-SOMETHING" appearing in body copy.
+_UA_RE = re.compile(r"\b(UA-\d{4,}-\d+)\b")
+_GTAG_RE = re.compile(r"""(?:^|["'=:/(,])((?:G-[A-Z0-9]{8,10})|(?:GTM-[A-Z0-9]{6,7}))(?=["'<&);\s]|$)""")
 
 # Type aliases for the injectable resolvers.
 IPResolver = Callable[[str], Optional[str]]
@@ -83,13 +95,25 @@ def _default_registrar_resolver(host: str) -> Optional[str]:
 
 
 def scrape_analytics_ids(html: str) -> list[str]:
-    """Extract unique analytics/tracking IDs (UA-/G-/GTM-) from page HTML, in order."""
+    """Extract unique analytics/tracking IDs (UA-/G-/GTM-) from page HTML, in order.
+
+    G-/GTM- IDs are only accepted inside a tracking-context delimiter (quote, '=',
+    URL path, gtag()/config call) so stray uppercase prose tokens cannot masquerade as
+    a strong campaign-linking entity. Matches are returned in first-seen order.
+    """
     if not html:
         return []
+    # Record (position, id) so the output preserves document order across both patterns.
+    hits: list[tuple[int, str]] = []
+    for m in _UA_RE.finditer(html):
+        hits.append((m.start(1), m.group(1)))
+    for m in _GTAG_RE.finditer(html):
+        hits.append((m.start(1), m.group(1)))
+    hits.sort(key=lambda h: h[0])
     seen: list[str] = []
-    for match in _ANALYTICS_RE.findall(html):
-        if match not in seen:
-            seen.append(match)
+    for _, tid in hits:
+        if tid not in seen:
+            seen.append(tid)
     return seen
 
 

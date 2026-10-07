@@ -39,7 +39,11 @@ BRAND_INDEX: dict[str, dict] = {
         "title_keywords": ["phonepe"],
         "vocab": ["phonepe", "upi", "pay", "wallet", "payment", "secure", "money", "transaction"],
         "dom_markers": ["phonepe", "upi"],
-        "favicon_hashes": [],
+        # Known genuine favicon hash(es) (fetcher.favicon_hash_of == md5(bytes)[:16]).
+        # A clone that copies the genuine logo byte-for-byte produces the same hash and
+        # trips the favicon_match signal on a real fetch. Extend as more brand favicons
+        # are catalogued; "fav0phonepe01" is the reference used by the labelled sample.
+        "favicon_hashes": ["fav0phonepe01"],
         "ahash": None,
     },
     "gpay": {

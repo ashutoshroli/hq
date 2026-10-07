@@ -14,7 +14,7 @@ import os
 from fastapi.testclient import TestClient
 
 from app.main import app
-from eval import campaign_demo, evaluate
+from eval import campaign_demo, dataset, evaluate
 
 FULL_FLOOR = 0.70
 
@@ -70,6 +70,22 @@ def test_eval_metrics_endpoint_graceful_when_absent(monkeypatch):
     body = resp.json()
     assert body["is_placeholder"] is True
     assert len(body["stages"]) == 3
+
+
+def test_full_stage_scores_match_real_pipeline():
+    """The full-stage eval score must equal pipeline.analyze_url's risk_score for every
+    item, so reported metrics cannot drift from real pipeline behaviour."""
+    from app.schemas import Entity
+    from app.services import pipeline
+
+    items = dataset.all_items()
+    for item in items:
+        fr = evaluate._build_fetch_result(item["url"], item.get("page"))
+        eval_score = evaluate._score_for_stage(item, "full", fr)
+        extra = [Entity(type=e["type"], value=e["value"]) for e in item.get("entities", [])]
+        cand = pipeline.analyze_url(item["url"], item["source"], extra_entities=extra,
+                                    do_fetch=False, fetch_result=fr)
+        assert eval_score == cand.risk_score, (item["url"], eval_score, cand.risk_score)
 
 
 def test_campaign_demo_discovers_campaigns():
