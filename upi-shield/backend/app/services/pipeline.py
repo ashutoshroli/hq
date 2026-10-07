@@ -1,14 +1,21 @@
-"""Orchestrates analysis stages. Add stages here as you build them:
-   DONE fetcher (httpx DOM + redirect chain; optional Playwright screenshot) -> best-effort
-   DONE visual similarity (lightweight pHash/structural vs brand index) -> sets visual_similarity, adds signals
-   DONE behaviour (UPI PIN/OTP fields, cross-domain form action, obfuscated JS)
-   DONE enrichment (DNS/IP/ASN/WHOIS/cert) -> more Entity rows (behind the fetch/enrich flag)
+"""Orchestrates the analysis stages for one URL.
+
+1. URL features      - lexical scoring, always on, no network.
+2. Fetch             - headless-Chromium render with screenshot (HTTP fallback).
+3. Visual            - brand identification from the screenshot/favicon, then
+                       similarity against the genuine brand's references.
+4. Behaviour         - credential-harvesting DOM tells.
+5. Enrichment        - IP/ASN/certificate/registrar/analytics linking entities.
+
+Stages 2-5 run only when fetching is enabled (``ANALYZE_FETCH`` or ``do_fetch``) or
+when the caller injects a ``fetch_result``; the default path stays offline.
 """
 import logging
 import os
 import uuid
 from datetime import UTC, datetime
 
+from app import brands
 from app.schemas import Candidate, Entity, Signal, SourceType
 from app.services import behaviour, enrichment, fetcher, url_features, visual
 
@@ -35,25 +42,46 @@ def analyze_url(url: str, source: SourceType, extra_entities: list[Entity] | Non
         result = fetcher.fetch(url)  # never raises; typed-empty on failure
 
     if result is not None and getattr(result, "ok", False):
-        if len(result.redirect_chain) > 1:
-            signals.append(Signal(
-                name="redirect_chain", weight=0.1,
-                detail=f"Redirects through {len(result.redirect_chain)} hops: "
-                       + " -> ".join(result.redirect_chain),
-            ))
+        final_host = url_features.host_of(result.final_url or url)
+        final_reg = url_features.registered_domain(final_host)
+        start_reg = url_features.registered_domain(host)
+        owner = brands.official_brand_for(final_reg)
+
         if result.favicon_hash:
             entities.append(Entity(type="favicon_hash", value=result.favicon_hash))
         # screenshot_url is set only when a renderer captured one (Playwright path).
         screenshot_url = getattr(result, "screenshot_url", None)
 
-        # Visual similarity vs the matched brand (lightweight pHash/structural).
-        sim, visual_signals = visual.compare_visual(result, brand)
-        if sim > 0 or visual_signals:
-            visual_similarity = sim
-            signals.extend(visual_signals)
+        if owner is not None:
+            # The page is served from a domain the brand owns: genuine infrastructure.
+            # Content-based tells (minified JS, card product pages, login forms) are
+            # expected there and must not count against it.
+            signals.append(Signal(name="official_brand_domain", weight=0.0,
+                                  detail=f"Final page is served from {final_reg}, owned by {owner}"))
+        else:
+            if final_reg != start_reg and len(result.redirect_chain) > 1:
+                signals.append(Signal(
+                    name="cross_site_redirect", weight=0.1,
+                    detail=f"Redirects across sites through {len(result.redirect_chain)} hops: "
+                           + " -> ".join(result.redirect_chain),
+                ))
 
-        # Behavioural phishing tells from the fetched DOM.
-        signals.extend(behaviour.analyze_behaviour(result))
+            # A clone on a domain that does not mention any brand is still identifiable
+            # by what it looks like.
+            if brand is None:
+                seen_brand, _seen_sim, id_signals = visual.identify_brand(result)
+                if seen_brand:
+                    brand = seen_brand
+                    signals.extend(id_signals)
+
+            # Visual similarity vs the matched brand (screenshot, favicon, structure).
+            sim, visual_signals = visual.compare_visual(result, brand)
+            if sim > 0 or visual_signals:
+                visual_similarity = sim
+                signals.extend(visual_signals)
+
+            # Behavioural phishing tells from the fetched DOM.
+            signals.extend(behaviour.analyze_behaviour(result, impersonating=brand is not None))
 
     # Infrastructure enrichment runs behind the SAME fetch/enrich flag so offline
     # tests stay deterministic (default off => lexical-only, no network). It is

@@ -48,6 +48,8 @@ class Settings:
     seed_demo: bool = field(default_factory=lambda: _flag("SEED_DEMO", True))
     # Live page fetch + infrastructure enrichment (network). Off by default.
     analyze_fetch: bool = field(default_factory=lambda: _flag("ANALYZE_FETCH", False))
+    # Render pages in headless Chromium (screenshots for visual matching) when fetching.
+    render_pages: bool = field(default_factory=lambda: _flag("RENDER_PAGES", True))
     # Background worker pool used by asynchronous ingestion and crawl jobs.
     job_workers: int = field(default_factory=lambda: max(1, _int("JOB_WORKERS", 4)))
     # Brand keywords queried against certificate-transparency logs.
