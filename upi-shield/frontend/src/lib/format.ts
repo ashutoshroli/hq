@@ -117,3 +117,23 @@ export function assetLabel(c: {
   if (c.kind === "message" && c.message) return `“${c.message.excerpt.slice(0, 90)}${c.message.excerpt.length > 90 ? "…" : ""}”`;
   return c.url;
 }
+
+export const ENTITY_LABELS: Record<string, string> = {
+  domain: "Domain",
+  ip: "IP address",
+  asn: "Network",
+  cert_fingerprint: "TLS certificate",
+  registrar: "Registrar",
+  upi_id: "UPI handle",
+  phone: "Phone",
+  telegram: "Telegram",
+  favicon_hash: "Favicon",
+  analytics_id: "Analytics ID",
+  package_name: "App package",
+  apk_sha256: "APK hash",
+  signing_cert: "Signing certificate",
+};
+
+export function entityLabel(type: string): string {
+  return ENTITY_LABELS[type] ?? humanize(type);
+}

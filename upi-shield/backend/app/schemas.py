@@ -281,6 +281,8 @@ class TakedownCreateRequest(BaseModel):
     campaign_id: str
     recipient: Recipient
     contact: str | None = None  # defaults to the first contact in the takedown plan
+    # Restrict the case to these plan targets (e.g. one brand's URLs); defaults to all.
+    targets: list[str] | None = None
     analyst: str = Field(default="analyst", max_length=120)
 
 

@@ -169,15 +169,32 @@ def targets_for(recipient: Recipient, members: list[Candidate]) -> list[str]:
     return [m.url for m in members if m.kind != "message"]
 
 
+def _member_matches(m: Candidate, wanted: set[str]) -> bool:
+    values = {m.url, m.domain, url_features.registered_domain(m.domain), *(e.value for e in m.entities)}
+    if m.app:
+        values.add(f"{m.app.package} ({m.app.sha256})")
+    return bool(values & wanted)
+
+
 def create_case(campaign: Campaign, members: list[Candidate], recipient: Recipient,
-                contact: str | None = None) -> TakedownCase:
+                contact: str | None = None, targets: list[str] | None = None) -> TakedownCase:
+    """Open a case. ``targets`` (from one plan item) narrows the case and its report to
+    the matching assets, e.g. only the URLs impersonating one brand."""
     now = datetime.now(UTC)
+    active = _active(members)
+    case_targets = targets_for(recipient, members)
+    scoped = active
+    if targets:
+        wanted = set(targets)
+        scoped = [m for m in active if _member_matches(m, wanted)] or active
+        case_targets = [t for t in targets if t in set(case_targets)] or list(targets)
     if contact is None:
         plan = takedown_plan(campaign, members)
-        contact = next((c for item in plan.items if item.recipient == recipient for c in item.contacts), None)
+        contact = next((c for item in plan.items if item.recipient == recipient
+                        and (not targets or set(item.targets) & set(targets)) for c in item.contacts), None)
     return TakedownCase(id="td-" + uuid.uuid4().hex[:10], campaign_id=campaign.id, recipient=recipient,
-                        contact=contact, targets=targets_for(recipient, members),
-                        report=takedown.generate(campaign, _active(members), recipient),
+                        contact=contact, targets=case_targets,
+                        report=takedown.generate(campaign, scoped, recipient),
                         created_at=now, updated_at=now)
 
 

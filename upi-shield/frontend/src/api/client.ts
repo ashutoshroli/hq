@@ -124,11 +124,12 @@ export const api = {
   takedownPlan: (campaignId: string) =>
     request<TakedownPlan>(`/campaigns/${encodeURIComponent(campaignId)}/takedown-plan`),
   takedowns: (campaignId?: string) => request<TakedownCase[]>(`/takedowns${query({ campaign_id: campaignId })}`),
-  createTakedown: (campaignId: string, recipient: Recipient, contact?: string) =>
+  createTakedown: (campaignId: string, recipient: Recipient, contact?: string, targets?: string[]) =>
     post<TakedownCase>("/takedowns", {
       campaign_id: campaignId,
       recipient,
       contact: contact || null,
+      targets: targets?.length ? targets : null,
       analyst: settings.getAnalyst(),
     }),
   updateTakedown: (id: string, status: TakedownStatus, note?: string) =>
