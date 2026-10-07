@@ -4,7 +4,7 @@ import os
 import re
 import uuid
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 
 from app.config import get_settings
@@ -17,6 +17,7 @@ from app.schemas import (
     GraphEdge,
     GraphNode,
     GraphResponse,
+    IngestAppUrlRequest,
     IngestBatchRequest,
     IngestFeedRequest,
     IngestMessageRequest,
@@ -28,7 +29,7 @@ from app.schemas import (
     TakedownRequest,
 )
 from app.seed import seed
-from app.services import ingest, takedown
+from app.services import apps, ingest, takedown
 from app.store import store
 
 logger = logging.getLogger(__name__)
@@ -108,6 +109,27 @@ def ingest_feed(req: IngestFeedRequest):
     return _job_response(job)
 
 
+@router.post("/ingest/app", response_model=IngestResponse, dependencies=write, tags=["ingestion"])
+async def ingest_app(file: UploadFile = File(..., description="Android APK"),
+                     source: str = Form("user_report")):
+    """Statically analyse an uploaded APK (fake banking / UPI app detection)."""
+    if source not in ("ct_log", "message", "user_report", "feed"):
+        raise HTTPException(422, "invalid source")
+    data = await file.read(apps.MAX_APK_BYTES + 1)
+    try:
+        cand = ingest.analyze_app_and_store(data, source)
+    except apps.ApkError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return IngestResponse(job_id=uuid.uuid4().hex[:8], status="done", candidate_ids=[cand.id])
+
+
+@router.post("/ingest/app/url", response_model=IngestResponse, status_code=202, dependencies=write,
+             tags=["ingestion"])
+def ingest_app_url(req: IngestAppUrlRequest):
+    """Download an APK from a URL (e.g. one pushed by a phishing page) and analyse it."""
+    return _job_response(jobs.submit("ingest_app_url", req.model_dump(), ingest.app_url_job(req.url, req.source)))
+
+
 @router.post("/crawl/ct", response_model=IngestResponse, status_code=202, dependencies=write, tags=["ingestion"])
 def crawl_ct(req: CrawlRequest):
     """Discover brand-lookalike hosts from certificate-transparency logs and analyse them."""
@@ -132,6 +154,7 @@ def get_job(job_id: str):
 
 @router.get("/candidates", response_model=list[Candidate], tags=["analysis"])
 def list_candidates(min_score: float = Query(0, ge=0, le=1), verdict: str | None = None,
+                    kind: str | None = Query(None, description="web or app"),
                     brand: str | None = None, source: str | None = None, campaign_id: str | None = None,
                     q: str | None = Query(None, description="Substring match on URL or domain"),
                     limit: int = Query(100, ge=1, le=1000), offset: int = Query(0, ge=0)):
@@ -139,6 +162,7 @@ def list_candidates(min_score: float = Query(0, ge=0, le=1), verdict: str | None
     items = [c for c in store.candidates.values()
              if c.risk_score >= min_score
              and (verdict is None or c.verdict == verdict)
+             and (kind is None or c.kind == kind)
              and (brand is None or c.brand_matched == brand)
              and (source is None or c.source == source)
              and (campaign_id is None or c.campaign_id == campaign_id)

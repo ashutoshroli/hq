@@ -11,15 +11,36 @@ import logging
 from app.config import get_settings
 from app.jobs import JobContext
 from app.schemas import Candidate, Entity, SourceType
-from app.services import crawler, extractor, feeds, pipeline
+from app.services import apps, crawler, extractor, feeds, fetcher, pipeline
 from app.store import store
 
 logger = logging.getLogger(__name__)
 
 
 def analyze_and_store(url: str, source: SourceType, extra_entities: list[Entity] | None = None) -> Candidate:
-    cand = pipeline.analyze_url(url, source, extra_entities=extra_entities)
+    def follow_apks(links: list[str]) -> None:
+        # Pages that push an APK are analysed together with the app they distribute.
+        from app.jobs import jobs
+
+        for link in links:
+            jobs.submit("ingest_app_url", {"url": link, "via": url}, app_url_job(link, source))
+
+    cand = pipeline.analyze_url(url, source, extra_entities=extra_entities, on_apk_links=follow_apks)
     return store.add(cand)
+
+
+def analyze_app_and_store(data: bytes, source: SourceType, origin_url: str | None = None) -> Candidate:
+    # The candidate URL embeds the APK hash, so re-submitting the same file updates it.
+    return store.add(apps.analyze_apk(data, source=source, origin_url=origin_url))
+
+
+def app_url_job(url: str, source: SourceType):
+    """Download an APK and analyse it."""
+    def body(ctx: JobContext) -> None:
+        ctx.set_total(1)
+        data = fetcher.download_apk(url)
+        ctx.advance(ok=True, candidate_id=analyze_app_and_store(data, source, origin_url=url).id)
+    return body
 
 
 def message_entities(found: dict[str, list[str]]) -> list[Entity]:

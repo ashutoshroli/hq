@@ -24,9 +24,9 @@ persisted to `backend/data/upi_shield.db` (override with `UPI_SHIELD_DB`).
 | Area | Endpoints |
 |------|-----------|
 | System | `GET /health`, `GET /stats`, `POST /admin/seed` |
-| Ingestion | `POST /ingest/url`, `POST /ingest/message`, `POST /ingest/batch`, `POST /ingest/feed`, `POST /crawl/ct` |
+| Ingestion | `POST /ingest/url`, `POST /ingest/message`, `POST /ingest/batch`, `POST /ingest/feed`, `POST /ingest/app`, `POST /ingest/app/url`, `POST /crawl/ct` |
 | Jobs | `GET /jobs`, `GET /jobs/{id}` |
-| Analysis | `GET /candidates` (filters: `min_score`, `verdict`, `brand`, `source`, `campaign_id`, `q`, `limit`, `offset`), `GET /candidates/{id}`, `GET /campaigns`, `GET /campaigns/{id}`, `GET /graph` |
+| Analysis | `GET /candidates` (filters: `min_score`, `verdict`, `kind`, `brand`, `source`, `campaign_id`, `q`, `limit`, `offset`), `GET /candidates/{id}`, `GET /campaigns`, `GET /campaigns/{id}`, `GET /graph` |
 | Reporting | `POST /reports/takedown`, `GET /eval/metrics` |
 
 Batch, feed and crawl requests return `202 Accepted` with a `job_id`; poll
@@ -92,6 +92,27 @@ entities, incremented `sightings`, refreshed `last_seen`) instead of duplicating
 4. **Enrichment** (`services/enrichment.py`) — resolves host -> ip/asn/cert/registrar
    and scrapes analytics IDs. Each lookup is an injectable resolver; defaults use the
    network but return `None` on failure, so the stage degrades gracefully offline.
+
+### Fake app detection (`services/apps.py`)
+
+Fake banking and UPI apps are spread as sideloaded APKs. `POST /ingest/app` (upload) and
+`POST /ingest/app/url` (download) analyse an APK statically, without executing it:
+
+* **Identity:** package name, label, version, and the v1/v2/v3 signing-certificate SHA-256.
+* **Impersonation:** a brand named or typosquatted in the label or package, an icon
+  matching the genuine app's Google Play icon (reference icons are in
+  `brand_refs.json`), or an official package name signed with a foreign certificate.
+* **Capabilities:** SMS interception, accessibility abuse, overlays, notification access,
+  call forwarding, silent installs, and a hidden launcher icon. These combine into a
+  `banking_trojan_profile` signal. Capabilities alone are capped below "malicious".
+* **Infrastructure:** C2 hosts, UPI handles, phone numbers, Telegram links and bot ids
+  are read from DEX strings and assets. They become linking entities, so an app joins
+  the campaign of the phishing pages it talks to. Phishing pages that offer an `.apk`
+  are flagged, and the APK is fetched and analysed automatically when fetching is on.
+
+App candidates have `kind: "app"`, `url: android://<package>?sha256=…` and an `app`
+summary. `POST /reports/takedown` with recipient `app_store` produces a Google Play /
+Play Protect report.
 
 ### Evasion tactics (`services/evasion.py`)
 
