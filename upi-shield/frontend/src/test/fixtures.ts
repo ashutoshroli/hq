@@ -31,3 +31,58 @@ export function mockApi(routes: Record<string, unknown>, status = 200) {
   globalThis.fetch = fetchMock as typeof fetch;
   return calls;
 }
+
+import type { Candidate, Job } from "../api/types";
+
+export function candidate(overrides: Partial<Candidate> = {}): Candidate {
+  return {
+    id: "seed1",
+    url: "http://phonepe-kyc-verify.xyz/login",
+    domain: "phonepe-kyc-verify.xyz",
+    source: "ct_log",
+    first_seen: "2026-10-07T09:00:00Z",
+    last_seen: null,
+    sightings: 1,
+    risk_score: 0.92,
+    verdict: "malicious",
+    brand_matched: "phonepe",
+    visual_similarity: 0.97,
+    screenshot_url: "/evidence/0123456789abcdef01234567.png",
+    signals: [
+      { name: "brand_in_unofficial_domain", weight: 0.5, detail: "'phonepe' appears in phonepe-kyc-verify.xyz" },
+      { name: "official_brand_domain", weight: 0, detail: "informational" },
+      { name: "lure_keywords", weight: 0.2, detail: "Contains: verify, kyc" },
+    ],
+    entities: [
+      { type: "domain", value: "phonepe-kyc-verify.xyz" },
+      { type: "upi_id", value: "rewards.help@okaxis" },
+    ],
+    campaign_id: "camp-1",
+    kind: "web",
+    app: null,
+    message: null,
+    infrastructure: null,
+    live: true,
+    review_status: "unreviewed",
+    review_note: null,
+    reviewed_by: null,
+    reviewed_at: null,
+    ...overrides,
+  };
+}
+
+export function job(overrides: Partial<Job> = {}): Job {
+  return {
+    id: "job1",
+    kind: "ingest_batch",
+    status: "running",
+    params: { count: 4 },
+    progress: { total: 4, processed: 1, failed: 0 },
+    candidate_ids: [],
+    error: null,
+    created_at: "2026-10-07T09:00:00Z",
+    started_at: "2026-10-07T09:00:01Z",
+    finished_at: null,
+    ...overrides,
+  };
+}
