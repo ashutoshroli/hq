@@ -24,6 +24,21 @@ from app.store import store
 logger = logging.getLogger(__name__)
 
 
+def _is_expected_failure(exc: Exception) -> bool:
+    """Unreachable hosts, dead links and malformed downloads are routine for phishing
+    infrastructure; they are recorded on the job without a stack trace."""
+    try:
+        import httpx
+
+        if isinstance(exc, httpx.HTTPError):
+            return True
+    except ImportError:  # pragma: no cover
+        pass
+    from app.services.apps import ApkError
+
+    return isinstance(exc, (ConnectionError, TimeoutError, ApkError, ValueError))
+
+
 class JobContext:
     """Handle passed to a job body to report progress and results."""
 
@@ -83,7 +98,10 @@ class JobManager:
             body(JobContext(job))
             job.status = "done"
         except Exception as exc:  # noqa: BLE001 - a failing job must be recorded, not crash the worker
-            logger.exception("job %s (%s) failed", job.id, job.kind)
+            if _is_expected_failure(exc):
+                logger.warning("job %s (%s) failed: %s: %s", job.id, job.kind, type(exc).__name__, exc)
+            else:
+                logger.exception("job %s (%s) failed", job.id, job.kind)
             job.status = "failed"
             job.error = f"{type(exc).__name__}: {exc}"
         job.finished_at = datetime.now(UTC)

@@ -23,7 +23,11 @@ RELATIONS = {
 
 
 def candidate_node_id(c: Candidate) -> str:
-    return f"package_name:{c.app.package}" if c.kind == "app" and c.app else f"domain:{c.domain}"
+    if c.kind == "app" and c.app:
+        return f"package_name:{c.app.package}"
+    if c.kind == "message":
+        return f"message:{c.id}"
+    return f"domain:{c.domain}"
 
 
 def build_graph(cands: list[Candidate]) -> GraphResponse:
@@ -33,7 +37,8 @@ def build_graph(cands: list[Candidate]) -> GraphResponse:
 
     for c in cands:
         cid = candidate_node_id(c)
-        nodes[cid] = GraphNode(id=cid, type="app" if c.kind == "app" else "domain", label=c.domain,
+        label = (c.message.excerpt[:60] if c.kind == "message" and c.message else c.domain)
+        nodes[cid] = GraphNode(id=cid, type={"app": "app", "message": "message"}.get(c.kind, "domain"), label=label,
                                campaign_id=c.campaign_id, candidate_id=c.id, risk_score=c.risk_score,
                                verdict=c.verdict, brand=c.brand_matched, kind=c.kind)
     for c in cands:

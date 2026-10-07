@@ -87,15 +87,18 @@ def ingest_url(req: IngestUrlRequest):
     if req.run_async:
         return _job_response(jobs.submit("ingest_url", {"url": req.url, "source": req.source},
                                          ingest.batch_job([req.url], req.source)))
-    cand = ingest.analyze_and_store(req.url, req.source)
-    return IngestResponse(job_id=uuid.uuid4().hex[:8], status="done", candidate_ids=[cand.id])
+    job_ids: list[str] = []
+    cand = ingest.analyze_and_store(req.url, req.source, job_ids=job_ids)
+    return IngestResponse(job_id=uuid.uuid4().hex[:8], status="done", candidate_ids=[cand.id], job_ids=job_ids)
 
 
 @router.post("/ingest/message", response_model=IngestResponse, dependencies=write, tags=["ingestion"])
 def ingest_message(req: IngestMessageRequest):
     """Extract URLs, UPI handles, phone numbers and Telegram handles from SMS/WhatsApp text."""
-    found, ids = ingest.ingest_message(req.text, req.source)
-    return IngestResponse(job_id=uuid.uuid4().hex[:8], status="done", candidate_ids=ids, extracted=found)
+    job_ids: list[str] = []
+    found, ids = ingest.ingest_message(req.text, req.source, job_ids=job_ids)
+    return IngestResponse(job_id=uuid.uuid4().hex[:8], status="done", candidate_ids=ids, extracted=found,
+                          job_ids=job_ids)
 
 
 @router.post("/ingest/batch", response_model=IngestResponse, status_code=202, dependencies=write,

@@ -50,6 +50,14 @@ def analyze_url(url: str, source: SourceType, extra_entities: list[Entity] | Non
             probes = probes if probes is not None else _probes(url)
     probes = probes or {}
 
+    # The URL served an APK rather than a page: analyse it as an app.
+    if result is not None and getattr(result, "content_type", "") == fetcher.APK_CONTENT_TYPE:
+        signals.append(Signal(name="apk_download", weight=0.2,
+                              detail=f"Serves an Android app directly from {result.final_url or url}"))
+        if on_apk_links is not None:
+            on_apk_links([result.final_url or url])
+        result = None
+
     live: bool | None = None
     offline = evasion.offline_reason(result) if result is not None else None
     if result is not None:

@@ -9,7 +9,7 @@ infrastructure behind them into campaigns, and drives takedowns to completion.
 
 | Requirement | Implementation |
 |-------------|----------------|
-| Crawler for suspicious pages and apps from certificate logs, messages and reports | CT discovery via the crt.sh PostgreSQL replica (`POST /crawl/ct`, optional schedule); SMS/WhatsApp extraction (`POST /ingest/message`); user reports and OpenPhish/URLhaus feeds (`/ingest/url`, `/ingest/batch`, `/ingest/feed`); APK upload/download and APK links found on phishing pages (`/ingest/app`, `/ingest/app/url`) |
+| Crawler for suspicious pages and apps from certificate logs, messages and reports | CT discovery via the crt.sh PostgreSQL replica (`POST /crawl/ct`, optional schedule); SMS/WhatsApp extraction (`POST /ingest/message`), including link-less lures stored as message candidates; user reports and OpenPhish/URLhaus feeds (`/ingest/url`, `/ingest/batch`, `/ingest/feed`); APK upload/download, plus APK links from messages, reports, feeds and phishing pages routed to app analysis (`/ingest/app`, `/ingest/app/url`) |
 | Visual and behavioural similarity engine matching clones to genuine brands | Headless-Chromium screenshots compared with genuine brand pages by perceptual hashing; favicon and app-icon matching; brand identification from appearance alone; DOM behaviour (UPI PIN/OTP/card fields, cross-domain posts, obfuscated JS, APK pushes); APK static analysis |
 | Infrastructure graph linking domains, hosts, wallets and phone numbers into campaigns | Enrichment (IP, ASN, certificate, registrar, RDAP age, abuse contacts); union-find clustering over UPI handles, phones, Telegram ids, favicons, analytics ids, C2 hosts and signing certificates, with CDN-aware and weak-evidence rules; `GET /graph`, `GET /pivot` |
 | Analyst dashboard and automated takedown report generator | Dashboard summary API, review queue with audit trail, routed takedown plans with verified contacts, tracked takedown cases with liveness re-checks, reports for nine recipient types, and Markdown/JSON/STIX 2.1/ZIP evidence exports |
@@ -86,8 +86,18 @@ entities, incremented `sightings`, refreshed `last_seen`) instead of duplicating
   registered domain is not owned by the brand. The public crt.sh PostgreSQL replica is
   used first (it is far more reliable than the JSON API); the JSON API is the fallback.
   Set `CRAWL_INTERVAL_MINUTES` to crawl on a schedule.
-* **Messages** (`POST /ingest/message`): URLs, UPI handles, phone numbers and Telegram
-  handles are extracted from SMS/WhatsApp text and attached as linking entities.
+* **Messages** (`POST /ingest/message`): URLs (including bare domains such as
+  `sbi-kyc.top/update`), UPI handles, phone numbers and Telegram handles are extracted
+  from SMS/WhatsApp text and attached to the analysed URLs as linking entities.
+  Messages **without any link**, which ask the victim to pay a mule UPI handle or call
+  a fake helpline, are stored as `kind: "message"` candidates. They are scored from the
+  lure wording (brand invoked, brand-impersonating UPI handle, payment or credential
+  request, KYC or blocking threats, urgency, rewards). Their indicators reach the graph
+  and campaigns, and card or account numbers are masked in the stored excerpt.
+* **APK links anywhere** (messages, reports, feeds, redirects, or files served without
+  an `.apk` extension) are queued for app analysis, and the job ids are returned as
+  `job_ids`. The resulting app carries the message's indicators and the distribution
+  host, so the message, the download site and the app join one campaign.
 * **Reports and feeds** (`POST /ingest/url`, `POST /ingest/batch`, `POST /ingest/feed`):
   analyst or user reports, and the OpenPhish and URLhaus public feeds (filtered to
   URLs that reference a monitored brand by default).

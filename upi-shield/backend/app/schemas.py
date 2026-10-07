@@ -13,7 +13,7 @@ EntityType = Literal[
 ]
 Recipient = Literal["registrar", "hosting", "bank", "npci", "cert_in", "safe_browsing", "app_store",
                     "cybercrime_portal", "telecom"]
-CandidateKind = Literal["web", "app"]
+CandidateKind = Literal["web", "app", "message"]
 ReviewStatus = Literal["unreviewed", "confirmed", "false_positive", "escalated"]
 TakedownStatus = Literal["drafted", "sent", "acknowledged", "resolved", "rejected"]
 
@@ -55,6 +55,15 @@ class InfrastructureSummary(BaseModel):
     registered_on: datetime | None = None
 
 
+class MessageSummary(BaseModel):
+    """A URL-less lure (``kind == "message"``): its masked excerpt and extracted indicators."""
+    sha256: str
+    excerpt: str
+    upi_ids: list[str] = []
+    phones: list[str] = []
+    telegram: list[str] = []
+
+
 class Candidate(BaseModel):
     id: str
     url: str
@@ -74,6 +83,7 @@ class Candidate(BaseModel):
     sightings: int = 1  # how many times the URL was ingested from any source
     kind: CandidateKind = "web"  # "app" for Android APK candidates (url is android://<package>)
     app: AppSummary | None = None
+    message: MessageSummary | None = None
     infrastructure: InfrastructureSummary | None = None
     # Liveness at the last analysis: True = serving content, False = taken down / error
     # page, None = not fetched. Lets analysts prioritise live threats.
@@ -105,6 +115,7 @@ class IngestResponse(BaseModel):
     status: JobStatus
     candidate_ids: list[str]
     extracted: dict[str, list[str]] = {}  # urls, upi_ids, phones found in the message
+    job_ids: list[str] = []  # background jobs started by this request (e.g. APK analysis)
 
 
 class IngestAppUrlRequest(BaseModel):

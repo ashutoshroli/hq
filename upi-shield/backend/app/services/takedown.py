@@ -81,7 +81,7 @@ def _recipient_context(campaign: Campaign, members: list[Candidate], recipient: 
         seen: set[str] = set()
         for m in members:
             # Registrars act on registered names only: skip apps and raw-IP hosts.
-            if m.kind == "app" or re.fullmatch(r"[\d.]+|\[?[0-9a-f:]+\]?", m.domain or ""):
+            if m.kind != "web" or re.fullmatch(r"[\d.]+|\[?[0-9a-f:]+\]?", m.domain or ""):
                 continue
             if m.domain and m.domain not in seen:
                 seen.add(m.domain)
@@ -103,7 +103,12 @@ def generate(campaign: Campaign, members: list[Candidate], recipient: Recipient)
     lines += ["", "Reported URLs:"]
     for m in members:
         reasons = "; ".join(s.name for s in m.signals if s.weight > 0)[:200] or "n/a"
-        what = f"Android app {m.app.label} ({m.app.package})" if m.kind == "app" and m.app else m.url
+        if m.kind == "app" and m.app:
+            what = f"Android app {m.app.label} ({m.app.package})"
+        elif m.kind == "message" and m.message:
+            what = f"{m.domain.upper()} lure \"{m.message.excerpt[:90]}\""
+        else:
+            what = m.url
         lines.append(f"  - {what}  (risk {m.risk_score:.2f}, seen {m.first_seen:%Y-%m-%d %H:%M} UTC; {reasons})")
         if m.screenshot_url:
             lines.append(f"      screenshot evidence: {m.screenshot_url}")
