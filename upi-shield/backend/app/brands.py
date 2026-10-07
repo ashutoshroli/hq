@@ -48,14 +48,14 @@ BRANDS: dict[str, Brand] = {b.key: b for b in [
           ("net.one97.paytm",),
           ("https://paytm.com/",),
           ("Paytm - One97 Communications Ltd.",)),
-    Brand("bhim", "BHIM UPI", ("bhim",),
+    Brand("bhim", "BHIM UPI", ("bhim", "upi"),
           frozenset({"bhimupi.org.in", "npci.org.in"}),
           ("national payments corporation of india",),
           ("in.org.npci.upiapp",),
           ("https://www.bhimupi.org.in/",),
           ("National Payments Corporation of India (NPCI)",)),
     Brand("sbi", "State Bank of India", ("sbi", "yono"),
-          frozenset({"onlinesbi.sbi", "sbi.co.in", "sbi", "yonobusiness.sbi", "sbi.bank.in", "onlinesbi.com",
+          frozenset({"onlinesbi.sbi", "sbi.co.in", "yonobusiness.sbi", "sbi.bank.in", "onlinesbi.com",
                      "sbicard.com", "yonosbi.com", "yonosbi.sbi", "sbilife.co.in", "sbimf.com", "sbigeneral.in",
                      "sbisecurities.in", "sbicaps.com"}),
           ("state bank of india",),
@@ -99,8 +99,15 @@ def is_official(brand_key: str, registered_domain: str) -> bool:
     return bool(brand and registered_domain in brand.official_domains)
 
 
+# Brand top-level domains: every name under them is operated by the brand.
+BRAND_TLDS: dict[str, str] = {"sbi": "sbi"}
+
+
 def official_brand_for(registered_domain: str) -> str | None:
     """Return the brand that owns ``registered_domain``, if any."""
+    tld = registered_domain.rsplit(".", 1)[-1]
+    if tld in BRAND_TLDS and "." in registered_domain:
+        return BRAND_TLDS[tld]
     for brand in BRANDS.values():
         if registered_domain in brand.official_domains:
             return brand.key

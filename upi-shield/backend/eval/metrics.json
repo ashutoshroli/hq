@@ -1,17 +1,57 @@
 {
+  "benchmarks": [
+    {
+      "collected": "2026-10-07",
+      "description": "Real-world lookalike hosts: active phishing reported by Phishing.Database and OpenPhish that impersonates a monitored brand (positives) versus Tranco top-1M domains containing brand keywords plus a random Tranco top-100k sample (negatives). Host-level, URL features only, offline.",
+      "f1": 0.8235,
+      "false_positive_rate": 0.0023,
+      "fn": 6,
+      "fp": 3,
+      "name": "real_world_lookalike_hosts",
+      "negatives": 1333,
+      "positives": 27,
+      "precision": 0.875,
+      "recall": 0.7778,
+      "sample_size": 1360,
+      "split": "test",
+      "stage": "url_only",
+      "threshold": 0.7,
+      "tn": 1330,
+      "tp": 21
+    },
+    {
+      "collected": "2026-10-07",
+      "description": "Real-world lookalike hosts: active phishing reported by Phishing.Database and OpenPhish that impersonates a monitored brand (positives) versus Tranco top-1M domains containing brand keywords plus a random Tranco top-100k sample (negatives). Host-level, URL features only, offline.",
+      "f1": 0.8679,
+      "false_positive_rate": 0.0015,
+      "fn": 5,
+      "fp": 2,
+      "name": "real_world_lookalike_hosts",
+      "negatives": 1345,
+      "positives": 28,
+      "precision": 0.92,
+      "recall": 0.8214,
+      "sample_size": 1373,
+      "split": "dev",
+      "stage": "url_only",
+      "threshold": 0.7,
+      "tn": 1343,
+      "tp": 23
+    }
+  ],
   "is_placeholder": false,
   "sample_size": 31,
   "stages": [
     {
-      "f1": 0.8571,
+      "f1": 0.9677,
       "precision": 1.0,
-      "recall": 0.75,
+      "recall": 0.9375,
       "stage": "url_only"
     },
     {
-      "f1": 0.9333,
+      "f1": 0.9677,
       "precision": 1.0,
-      "recall": 0.875,
+      "recall": 0.9375,
       "stage": "url+visual"
     },
     {

@@ -96,3 +96,71 @@ def test_campaign_demo_discovers_campaigns():
     for camp in campaigns:
         assert camp.size >= 2
         assert camp.shared_entities
+
+
+# --- real-world benchmark ----------------------------------------------------------
+
+import csv  # noqa: E402
+
+import pytest  # noqa: E402
+
+from app.services import url_features  # noqa: E402
+
+
+def test_benchmark_file_is_well_formed():
+    from eval import evaluate as ev
+
+    with open(ev.BENCHMARK_PATH, encoding="utf-8", newline="") as fh:
+        rows = list(csv.DictReader(fh))
+    assert {r["label"] for r in rows} == {"phishing", "benign"}
+    assert {r["split"] for r in rows} == {"dev", "test"}
+    hosts = [url_features.host_of(r["url"]) for r in rows]
+    assert len(hosts) == len(set(hosts)), "one row per host"
+    assert all(r["url"] == f"https://{h}/" for r, h in zip(rows, hosts, strict=True)), "host-level rows only"
+    assert all(r["target"] for r in rows if r["label"] == "phishing")
+
+
+def test_benchmark_split_is_deterministic():
+    from eval.build_benchmark import split_for
+
+    assert split_for("example.com") == split_for("example.com")
+    assert {split_for(f"host{i}.test") for i in range(50)} == {"dev", "test"}
+
+
+def test_benchmark_metrics_are_published():
+    from eval import evaluate as ev
+
+    result = ev.evaluate()
+    by_split = {b["split"]: b for b in result["benchmarks"]}
+    assert set(by_split) == {"test", "dev"}
+    test = by_split["test"]
+    assert test["positives"] >= 20 and test["negatives"] >= 1000
+    assert test["tp"] + test["fn"] == test["positives"] and test["fp"] + test["tn"] == test["negatives"]
+    # Regression floor for the held-out split; update deliberately when the benchmark is rebuilt.
+    assert test["precision"] >= 0.8 and test["recall"] >= 0.7 and test["false_positive_rate"] <= 0.005
+
+
+def test_wilson_interval_bounds():
+    from eval.evaluate import wilson
+
+    lo, hi = wilson(21, 27)
+    assert 0 < lo < 21 / 27 < hi < 1
+    assert wilson(0, 0) == (0.0, 0.0)
+
+
+@pytest.mark.parametrize("host", [
+    "lesbianstories.com", "famousbirthdays.com", "abhimanu.com", "ausbildung.de", "catholicicing.com",
+    "coinsbit.io", "dgpay.eu", "yonomi.cloud", "nic.sbi", "sbiepay.sbi",
+])
+def test_short_keyword_collisions_are_not_brand_matches(host):
+    score, _signals, brand = url_features.score_url(f"https://{host}/")
+    assert brand is None or score < 0.7, host
+
+
+@pytest.mark.parametrize("host", [
+    "sbi-kyc.pages.dev", "hdfcmo-e9a29.web.app", "sbibank-kyc.in", "www.netbanking-hdfcbank.com",
+    "internetbanking-paytmbank.com", "axisbankkyc.wuaze.com", "hdfcbank.com.dragonflydowser.com",
+])
+def test_known_phishing_hosts_are_detected(host):
+    score, _signals, _brand = url_features.score_url(f"https://{host}/")
+    assert score >= 0.7, host
