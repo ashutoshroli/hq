@@ -1,6 +1,6 @@
 """Tests for infrastructure enrichment, enriched-entity clustering, and recipient
 context in takedown reports. Everything runs fully offline via stubbed resolvers."""
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from app.schemas import Candidate, Entity, Signal
@@ -10,7 +10,7 @@ from app.services import clustering, enrichment, takedown
 def _cand(cid: str, url: str, domain: str, entities: list[Entity], brand="phonepe") -> Candidate:
     return Candidate(
         id=cid, url=url, domain=domain, source="ct_log",
-        first_seen=datetime.now(timezone.utc), risk_score=0.9, verdict="malicious",
+        first_seen=datetime.now(UTC), risk_score=0.9, verdict="malicious",
         brand_matched=brand,
         signals=[Signal(name="brand_in_unofficial_domain", weight=0.5, detail="x")],
         entities=[Entity(type="domain", value=domain), *entities],

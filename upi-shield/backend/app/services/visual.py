@@ -19,7 +19,6 @@ Returns (0.0, []) when fetch_result is empty (no html and no favicon).
 import logging
 import re
 from html.parser import HTMLParser
-from typing import Optional
 
 from app.schemas import Signal
 
@@ -173,7 +172,7 @@ def _jaccard(a: set[str], b: set[str]) -> float:
 
 # --- Perceptual hashing (optional, Pillow-only) ----------------------------
 
-def average_hash(image_bytes: bytes, size: int = 8) -> Optional[str]:
+def average_hash(image_bytes: bytes, size: int = 8) -> str | None:
     """Compute an average-hash (aHash) hex string for image bytes using Pillow.
 
     Returns None when Pillow is not installed or the image cannot be decoded, so
@@ -190,7 +189,7 @@ def average_hash(image_bytes: bytes, size: int = 8) -> Optional[str]:
         pixels = list(img.getdata())
         avg = sum(pixels) / len(pixels)
         bits = "".join("1" if p >= avg else "0" for p in pixels)
-        return "%0*x" % (size * size // 4, int(bits, 2))
+        return f"{int(bits, 2):0{size * size // 4}x}"
     except Exception as exc:  # noqa: BLE001
         logger.warning("visual: average_hash failed: %s", exc)
         return None
@@ -210,8 +209,8 @@ def hamming_similarity(hash_a: str, hash_b: str) -> float:
 
 # --- Public API ------------------------------------------------------------
 
-def compare_visual(fetch_result, brand: Optional[str],
-                   favicon_image: Optional[bytes] = None) -> tuple[float, list[Signal]]:
+def compare_visual(fetch_result, brand: str | None,
+                   favicon_image: bytes | None = None) -> tuple[float, list[Signal]]:
     """Compare a fetched page against a brand reference.
 
     Returns (similarity 0..1, signals). Uses a perceptual-hash path when an image

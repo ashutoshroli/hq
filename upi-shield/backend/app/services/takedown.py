@@ -1,5 +1,5 @@
 """Takedown report text per recipient. Extend with WHOIS/hosting contacts and screenshots."""
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.schemas import Campaign, Candidate, Recipient, TakedownReport
 
@@ -69,8 +69,8 @@ def _recipient_context(campaign: Campaign, members: list[Candidate], recipient: 
 
 
 def generate(campaign: Campaign, members: list[Candidate], recipient: Recipient) -> TakedownReport:
-    lines = [INTRO[recipient], "", f"Campaign: {campaign.name} ({campaign.size} sites, first seen {campaign.first_seen:%Y-%m-%d})", "",
-             "Evidence linking these sites:"]
+    header = f"Campaign: {campaign.name} ({campaign.size} sites, first seen {campaign.first_seen:%Y-%m-%d})"
+    lines = [INTRO[recipient], "", header, "", "Evidence linking these sites:"]
     lines += [f"  - shared {e.type}: {e.value}" for e in campaign.shared_entities] or ["  - (none recorded)"]
     lines += _recipient_context(campaign, members, recipient)
     lines += ["", "Reported URLs:"]
@@ -78,5 +78,5 @@ def generate(campaign: Campaign, members: list[Candidate], recipient: Recipient)
         reasons = "; ".join(s.name for s in m.signals[:3]) or "n/a"
         lines.append(f"  - {m.url}  (risk {m.risk_score:.2f}, seen {m.first_seen:%Y-%m-%d %H:%M} UTC; {reasons})")
     lines += ["", "Generated automatically; analyst-reviewed before sending."]
-    return TakedownReport(campaign_id=campaign.id, recipient=recipient, generated_at=datetime.now(timezone.utc),
+    return TakedownReport(campaign_id=campaign.id, recipient=recipient, generated_at=datetime.now(UTC),
                           subject=f"Phishing takedown request: {campaign.name}", body="\n".join(lines))

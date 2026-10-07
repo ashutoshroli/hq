@@ -22,12 +22,10 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Optional
 
 from app.schemas import Entity, EvalMetrics, StageMetrics
-from app.services import behaviour, enrichment, pipeline, url_features, visual
+from app.services import enrichment, pipeline, url_features, visual
 from app.services.fetcher import FetchResult
-
 from eval import dataset
 
 METRICS_PATH = os.path.join(os.path.dirname(__file__), "metrics.json")
@@ -35,7 +33,7 @@ METRICS_PATH = os.path.join(os.path.dirname(__file__), "metrics.json")
 STAGES = ("url_only", "url+visual", "full")
 
 
-def _build_fetch_result(url: str, page: Optional[dict]) -> Optional[FetchResult]:
+def _build_fetch_result(url: str, page: dict | None) -> FetchResult | None:
     """Turn a canned page fixture into an ``ok=True`` FetchResult, or None if absent."""
     if not page:
         return None
@@ -75,7 +73,7 @@ def _stub_resolvers(item: dict) -> dict:
     }
 
 
-def _full_score_via_pipeline(item: dict, fr: Optional[FetchResult]) -> float:
+def _full_score_via_pipeline(item: dict, fr: FetchResult | None) -> float:
     """Full-stage score driven through the REAL pipeline (no parallel re-implementation).
 
     Uses the same offline injection path as campaign_demo: do_fetch=False so no live
@@ -94,7 +92,7 @@ def _full_score_via_pipeline(item: dict, fr: Optional[FetchResult]) -> float:
     return cand.risk_score
 
 
-def _score_for_stage(item: dict, stage: str, fr: Optional[FetchResult]) -> float:
+def _score_for_stage(item: dict, stage: str, fr: FetchResult | None) -> float:
     """Compute the cumulative risk score for one item under one stage config.
 
     The ``full`` stage is driven through ``pipeline.analyze_url`` so it cannot diverge
@@ -135,7 +133,7 @@ def evaluate() -> dict:
     stage_metrics: list[dict] = []
     for stage in STAGES:
         tp = fp = fn = tn = 0
-        for item, fr in zip(items, fetch_results):
+        for item, fr in zip(items, fetch_results, strict=True):
             gold_malicious = item["label"] == "malicious"
             score = _score_for_stage(item, stage, fr)
             pred_malicious = score >= threshold

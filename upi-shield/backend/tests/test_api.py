@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.services import clustering, extractor, url_features
+from app.services import extractor, url_features
 
 
 def test_url_scoring():

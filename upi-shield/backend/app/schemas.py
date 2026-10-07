@@ -1,6 +1,6 @@
 """API contract. Agree on these with the frontend teammate and avoid renaming fields later."""
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -33,12 +33,12 @@ class Candidate(BaseModel):
     first_seen: datetime
     risk_score: float = Field(ge=0, le=1)
     verdict: Verdict
-    brand_matched: Optional[str] = None
-    visual_similarity: Optional[float] = Field(default=None, ge=0, le=1)  # filled by visual engine
-    screenshot_url: Optional[str] = None
+    brand_matched: str | None = None
+    visual_similarity: float | None = Field(default=None, ge=0, le=1)  # filled by visual engine
+    screenshot_url: str | None = None
     signals: list[Signal] = []
     entities: list[Entity] = []
-    campaign_id: Optional[str] = None
+    campaign_id: str | None = None
 
 
 class IngestUrlRequest(BaseModel):
@@ -73,7 +73,7 @@ class GraphNode(BaseModel):
     id: str
     type: str
     label: str
-    campaign_id: Optional[str] = None
+    campaign_id: str | None = None
 
 
 class GraphEdge(BaseModel):
