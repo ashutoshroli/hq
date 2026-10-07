@@ -112,6 +112,16 @@ def _host(url: str) -> str:
         return ""
 
 
+_APK_HREF = re.compile(r"""href\s*=\s*["']([^"']+?\.apk(?:\?[^"']*)?)["']""", re.I)
+
+
+def apk_links(fetch_result) -> list[str]:
+    """Absolute URLs of APK downloads offered by the page."""
+    html = getattr(fetch_result, "html", "") or ""
+    base = getattr(fetch_result, "final_url", "") or getattr(fetch_result, "url", "")
+    return list(dict.fromkeys(urljoin(base, h) for h in _APK_HREF.findall(html)))[:5]
+
+
 def analyze_behaviour(fetch_result, impersonating: bool = True) -> list[Signal]:
     """Inspect a fetched page and return phishing-behaviour Signals ([] when no html).
 
@@ -190,7 +200,13 @@ def analyze_behaviour(fetch_result, impersonating: bool = True) -> list[Signal]:
         signals.append(Signal(name="obfuscated_js", weight=0.25 if in_context else 0.05,
                               detail="Obfuscated/eval'd inline JS: " + ", ".join(sorted(set(hits)))))
 
-    # --- 4) Credential-harvesting keywords in visible text ---
+    # --- 4) Sideloaded app distribution ---
+    offered = apk_links(fetch_result)
+    if offered:
+        signals.append(Signal(name="apk_download_offered", weight=0.2 if in_context else 0.1,
+                              detail="Offers an Android app outside Google Play: " + ", ".join(offered[:3])))
+
+    # --- 5) Credential-harvesting keywords in visible text ---
     low_text = collector.text.lower()
     harvest_hits = [w for w in _HARVEST_WORDS if w in low_text]
     if harvest_hits:

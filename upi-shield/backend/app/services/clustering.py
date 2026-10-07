@@ -9,11 +9,37 @@ from collections import defaultdict
 
 from app.schemas import Campaign, Candidate, Entity
 
-# 'domain' is unique per candidate, so it never links anything; others are shared infrastructure.
-LINKING = {"ip", "asn", "cert_fingerprint", "upi_id", "phone", "telegram", "favicon_hash", "analytics_id", "registrar"}
+LINKING = {"ip", "asn", "cert_fingerprint", "upi_id", "phone", "telegram", "favicon_hash", "analytics_id", "registrar",
+           "domain", "package_name", "apk_sha256", "signing_cert"}
 # WEAK types are shared by many unrelated sites (a registrar/ASN can host thousands),
 # so they alone must NOT merge candidates; they only reinforce links from strong types.
 WEAK = {"registrar", "asn"}
+
+# Widely shared values that would merge unrelated campaigns.
+# The AOSP "testkey" certificate signs a large share of unrelated sideloaded malware.
+SHARED_SIGNING_CERTS = {"a40da80a59d170caa950cf15c18c454d47a39b26989d8b640ecd745ba71bf5dc"}
+
+
+def _is_linking(entity: Entity) -> bool:
+    """Whether an entity value is specific enough to tie two candidates to one operator.
+
+    A ``domain`` links a phishing page to an app that calls it, or two URLs on one host,
+    but URL shorteners, bare hosting-platform domains and brand-owned domains are
+    shared by everyone and never link.
+    """
+    if entity.type not in LINKING:
+        return False
+    if entity.type == "domain":
+        from app import brands
+        from app.services import evasion, url_features
+
+        host = entity.value.lower()
+        reg = url_features.registered_domain(host)
+        return not (evasion.is_shortener(host) or host in evasion.FREE_HOSTING_SUFFIXES
+                    or brands.official_brand_for(reg) is not None)
+    if entity.type == "signing_cert":
+        return entity.value.lower() not in SHARED_SIGNING_CERTS
+    return True
 
 
 def campaign_id_for(anchor: Candidate) -> str:
@@ -37,10 +63,12 @@ def build_campaigns(cands: list[Candidate]) -> list[Campaign]:
     by_shared: dict[tuple[str, str], list[str]] = defaultdict(list)       # all LINKING, for evidence
     for c in cands:
         for e in c.entities:
-            if e.type in LINKING:
-                by_shared[(e.type, e.value)].append(c.id)
-                if e.type not in WEAK:
-                    by_entity[(e.type, e.value)].append(c.id)
+            if _is_linking(e):
+                key = (e.type, e.value.lower() if e.type == "domain" else e.value)
+                if c.id not in by_shared[key]:
+                    by_shared[key].append(c.id)
+                if e.type not in WEAK and c.id not in by_entity[key]:
+                    by_entity[key].append(c.id)
     for ids in by_entity.values():
         for other in ids[1:]:
             parent[find(other)] = find(ids[0])

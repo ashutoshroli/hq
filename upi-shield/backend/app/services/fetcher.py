@@ -119,6 +119,28 @@ def probe(url: str, user_agent: str, timeout: float = DEFAULT_TIMEOUT) -> FetchR
         return FetchResult(url=url, user_agent=user_agent)
 
 
+def download_apk(url: str, max_bytes: int = 150 * 1024 * 1024, timeout: float = 60.0) -> bytes:
+    """Download an APK with an Android user agent (kits often serve APKs to phones only).
+
+    Raises ``ValueError`` when the response is not an APK-sized ZIP payload.
+    """
+    import httpx
+
+    with httpx.Client(follow_redirects=True, timeout=timeout, verify=False,
+                      headers={"User-Agent": MOBILE_UA}) as client, client.stream("GET", url) as resp:
+        resp.raise_for_status()
+        chunks, total = [], 0
+        for chunk in resp.iter_bytes():
+            total += len(chunk)
+            if total > max_bytes:
+                raise ValueError("APK exceeds the size limit")
+            chunks.append(chunk)
+    data = b"".join(chunks)
+    if not data.startswith(b"PK"):
+        raise ValueError("download is not an APK/ZIP file")
+    return data
+
+
 def save_evidence(data: bytes, suffix: str = "png") -> str | None:
     """Persist an evidence artefact by content hash and return its API path."""
     from app.config import get_settings
