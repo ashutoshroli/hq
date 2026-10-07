@@ -6,3 +6,5 @@ __pycache__/
 .ruff_cache/
 .agents/
 .python-version
+upi-shield/backend/data/
+upi-shield/backend/tests/.evidence/

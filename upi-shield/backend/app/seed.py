@@ -19,7 +19,7 @@ def _c(i, url, domain, brand, score, ents, minutes_ago, source="ct_log"):
 
 
 def seed() -> None:
-    store.candidates.clear()
+    store.clear()
     fav, upi = Entity(type="favicon_hash", value="a1b2c3d4"), Entity(type="upi_id", value="rewards.help@okaxis")
     ip, ph = Entity(type="ip", value="203.0.113.7"), Entity(type="phone", value="9876543210")
     rows = [
