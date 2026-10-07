@@ -264,6 +264,7 @@ export interface CandidateFilters {
   campaign_id?: string;
   kind?: CandidateKind;
   live?: boolean;
+  review?: ReviewStatus;
   q?: string;
   limit?: number;
   offset?: number;

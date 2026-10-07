@@ -319,5 +319,6 @@ often before the page goes live.
 * **Unverified contacts are not guessed.** Brand phishing-report addresses are
   included only where published on the brand's own site (ICICI, HDFC); other brands
   show `lookup_required`.
-* **Dashboard in progress.** The `frontend/` dashboard currently provides the overview
-  and settings pages; detections, ingestion, campaigns and takedown screens follow.
+* **Dashboard in progress.** The `frontend/` dashboard provides the overview,
+  detections (list, detail and review), reporting/ingestion, jobs and settings pages;
+  campaign, graph, takedown and evaluation screens follow.

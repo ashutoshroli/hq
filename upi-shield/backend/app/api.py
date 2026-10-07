@@ -165,6 +165,7 @@ def get_job(job_id: str):
 def list_candidates(min_score: float = Query(0, ge=0, le=1), verdict: str | None = None,
                     kind: str | None = Query(None, description="web or app"),
                     live: bool | None = Query(None, description="only live (true) or taken-down (false) assets"),
+                    review: str | None = Query(None, description="review status, e.g. unreviewed"),
                     brand: str | None = None, source: str | None = None, campaign_id: str | None = None,
                     q: str | None = Query(None, description="Substring match on URL or domain"),
                     limit: int = Query(100, ge=1, le=1000), offset: int = Query(0, ge=0)):
@@ -174,6 +175,7 @@ def list_candidates(min_score: float = Query(0, ge=0, le=1), verdict: str | None
              and (verdict is None or c.verdict == verdict)
              and (kind is None or c.kind == kind)
              and (live is None or c.live is live)
+             and (review is None or c.review_status == review)
              and (brand is None or c.brand_matched == brand)
              and (source is None or c.source == source)
              and (campaign_id is None or c.campaign_id == campaign_id)

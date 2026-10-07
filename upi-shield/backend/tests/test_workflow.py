@@ -152,3 +152,12 @@ def test_new_recipients_generate_reports():
         body = takedown.generate(camp, members, recipient).body
         assert "Reported URLs" in body
     assert "9876543210" in takedown.generate(camp, members, "telecom").body
+
+
+def test_candidates_can_be_filtered_by_review_status():
+    with TestClient(app) as client:
+        cid = client.get("/candidates").json()[0]["id"]
+        client.post(f"/candidates/{cid}/review", json={"status": "confirmed"})
+        confirmed = client.get("/candidates", params={"review": "confirmed"}).json()
+        assert [c["id"] for c in confirmed] == [cid]
+        assert cid not in [c["id"] for c in client.get("/candidates", params={"review": "unreviewed"}).json()]
