@@ -1,4 +1,10 @@
-"""Campaign clustering: union-find over shared infrastructure entities."""
+"""Campaign clustering: union-find over shared infrastructure entities.
+
+Campaign ids are stable: each campaign is named after a hash of its anchor member
+(the earliest-seen candidate), so ids do not shift when unrelated candidates are
+ingested. Candidates with a ``benign`` verdict never take part in clustering.
+"""
+import hashlib
 from collections import defaultdict
 
 from app.schemas import Campaign, Candidate, Entity
@@ -10,7 +16,12 @@ LINKING = {"ip", "asn", "cert_fingerprint", "upi_id", "phone", "telegram", "favi
 WEAK = {"registrar", "asn"}
 
 
+def campaign_id_for(anchor: Candidate) -> str:
+    return "camp-" + hashlib.sha1(anchor.id.encode("utf-8")).hexdigest()[:8]
+
+
 def build_campaigns(cands: list[Candidate]) -> list[Campaign]:
+    cands = [c for c in cands if c.verdict != "benign"]
     parent = {c.id: c.id for c in cands}
 
     def find(x: str) -> str:
@@ -39,15 +50,16 @@ def build_campaigns(cands: list[Candidate]) -> list[Campaign]:
         groups[find(c.id)].append(c)
 
     campaigns: list[Campaign] = []
-    for members in sorted((g for g in groups.values() if len(g) >= 2), key=lambda g: min(m.first_seen for m in g)):
+    clusters = [sorted(g, key=lambda m: (m.first_seen, m.id)) for g in groups.values() if len(g) >= 2]
+    for members in sorted(clusters, key=lambda g: (g[0].first_seen, g[0].id)):
         ids = {m.id for m in members}
         shared = [Entity(type=t, value=v) for (t, v), who in by_shared.items() if len(set(who) & ids) >= 2]
         brands = sorted({m.brand_matched for m in members if m.brand_matched})
         campaigns.append(Campaign(
-            id=f"camp-{len(campaigns) + 1}",
+            id=campaign_id_for(members[0]),
             name="Campaign targeting " + (", ".join(brands) if brands else "unknown brand"),
             first_seen=min(m.first_seen for m in members),
-            last_seen=max(m.first_seen for m in members),
+            last_seen=max(m.last_seen or m.first_seen for m in members),
             size=len(members), brands_targeted=brands,
             candidate_ids=sorted(ids), shared_entities=shared,
         ))

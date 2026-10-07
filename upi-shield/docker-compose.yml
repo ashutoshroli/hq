@@ -2,3 +2,15 @@ services:
   api:
     build: ./backend
     ports: ["8000:8000"]
+    environment:
+      # Enable live page fetching and infrastructure enrichment for real investigations.
+      ANALYZE_FETCH: "${ANALYZE_FETCH:-0}"
+      # Run a certificate-transparency crawl every N minutes (0 disables).
+      CRAWL_INTERVAL_MINUTES: "${CRAWL_INTERVAL_MINUTES:-0}"
+      # Optional shared secret required (as X-API-Key) on mutating endpoints.
+      UPI_SHIELD_API_KEY: "${UPI_SHIELD_API_KEY:-}"
+    volumes:
+      - shield-data:/srv/data
+
+volumes:
+  shield-data:
