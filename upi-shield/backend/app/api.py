@@ -29,7 +29,8 @@ def ingest_url(req: IngestUrlRequest):
 def ingest_message(req: IngestMessageRequest):
     found = extractor.extract(req.text)
     extra = [Entity(type="upi_id", value=u) for u in found["upi_ids"]] + \
-            [Entity(type="phone", value=p) for p in found["phones"]]
+            [Entity(type="phone", value=p) for p in found["phones"]] + \
+            [Entity(type="telegram", value=t) for t in found.get("telegram", [])]
     ids = []
     for url in found["urls"]:
         cand = pipeline.analyze_url(url, req.source, extra_entities=list(extra))

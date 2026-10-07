@@ -1,6 +1,8 @@
 fastapi>=0.110
 uvicorn[standard]>=0.29
 pydantic>=2.6
-httpx>=0.27      # tests (TestClient)
+httpx>=0.27      # TestClient + crawler/fetcher HTTP (CT logs, page fetch)
 pytest>=8.0
-# add later: playwright, tldextract, python-whois, faiss-cpu, open_clip_torch, networkx
+# OPTIONAL (not required by tests or pipeline; guarded by try/except):
+#   playwright  -> optional rendered fetch/screenshot (needs `playwright install chromium`)
+# add later: tldextract, python-whois, faiss-cpu, open_clip_torch, networkx
