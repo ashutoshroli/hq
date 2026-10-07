@@ -11,6 +11,7 @@ FetchResult (html='' and empty collections) and never raises.
 import hashlib
 import logging
 import os
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
@@ -41,6 +42,7 @@ class FetchResult:
     screenshot_url: str | None = None
     title: str = ""
     user_agent: str = ""
+    content_type: str = ""
 
 
 class _PageParser(HTMLParser):
@@ -108,6 +110,27 @@ MOBILE_UA = ("Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 "
 
 
 CRAWLER_UA = "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
+
+
+APK_CONTENT_TYPE = "application/vnd.android.package-archive"
+_APK_PATH = re.compile(r"\.apk(?:$|[?#])", re.I)
+
+
+def is_apk_url(url: str) -> bool:
+    """True when a URL path points at an Android package."""
+    from urllib.parse import urlsplit
+
+    try:
+        parts = urlsplit(url if "://" in url else "http://" + url)
+    except ValueError:
+        return False
+    return bool(_APK_PATH.search(parts.path + ("?" if parts.query else ""))) or \
+        parts.query.lower().endswith(".apk")
+
+
+def is_apk_response(content_type: str, head: bytes) -> bool:
+    return content_type == APK_CONTENT_TYPE or (content_type in ("application/octet-stream", "application/zip", "")
+                                                and head.startswith(b"PK\x03\x04"))
 
 
 def probe(url: str, user_agent: str, timeout: float = DEFAULT_TIMEOUT) -> FetchResult:
@@ -245,6 +268,11 @@ def _httpx_fetch(url: str, timeout: float, user_agent: str = DESKTOP_UA) -> Fetc
                       headers={"User-Agent": user_agent, "Accept-Language": "en-IN,en;q=0.9"}) as client:
         resp = client.get(url)
         chain = [str(h.url) for h in resp.history] + [str(resp.url)]
+        content_type = resp.headers.get("content-type", "").split(";")[0].strip().lower()
+        if is_apk_response(content_type, resp.content[:4]):
+            # Binary download, not a page: hand it to app analysis instead of parsing it.
+            return FetchResult(url=url, final_url=str(resp.url), redirect_chain=chain, status=resp.status_code,
+                               ok=True, user_agent=user_agent, content_type=APK_CONTENT_TYPE)
         html = resp.text
         forms, external, favicon = parse_html(html, str(resp.url))
         icon = _fetch_favicon(client, str(resp.url), favicon)
@@ -252,7 +280,7 @@ def _httpx_fetch(url: str, timeout: float, user_agent: str = DESKTOP_UA) -> Fetc
                            status=resp.status_code, html=html, forms=forms,
                            external_script_srcs=external, favicon_href=favicon,
                            favicon_hash=favicon_hash_of(icon) if icon else None, ok=True,
-                           favicon_bytes=icon, user_agent=user_agent)
+                           favicon_bytes=icon, user_agent=user_agent, content_type=content_type)
 
 
 def fetch(url: str, timeout: float = DEFAULT_TIMEOUT, use_playwright: bool | None = None,

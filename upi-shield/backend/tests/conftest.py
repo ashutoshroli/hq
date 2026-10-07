@@ -33,4 +33,8 @@ def offline_lookups(monkeypatch):
 
     monkeypatch.setattr(enrichment, "domain_created", lambda domain: None)
     monkeypatch.setattr(enrichment, "infrastructure", lambda host, ip=None: None)
+    def _no_download(url, *a, **k):
+        raise ConnectionError("network disabled in tests")
+
+    monkeypatch.setattr(fetcher, "download_apk", _no_download)
     monkeypatch.setattr(fetcher, "probe", lambda url, ua, timeout=None: fetcher.FetchResult(url=url, user_agent=ua))

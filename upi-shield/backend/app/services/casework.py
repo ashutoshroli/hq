@@ -166,7 +166,7 @@ def targets_for(recipient: Recipient, members: list[Candidate]) -> list[str]:
         return _entities(members, "phone")
     if recipient == "app_store":
         return [m.url for m in members if m.kind == "app"]
-    return [m.url for m in members]
+    return [m.url for m in members if m.kind != "message"]
 
 
 def create_case(campaign: Campaign, members: list[Candidate], recipient: Recipient,
@@ -271,12 +271,16 @@ def stix_bundle(campaign: Campaign, members: list[Candidate]) -> dict:
     for m in _active(members):
         if m.kind == "app" and m.app:
             indicator(m.app.sha256, f"[file:hashes.'SHA-256' = '{m.app.sha256}']", f"Fake app {m.app.package}")
+        elif m.kind == "message":
+            continue  # its UPI handles and phones are exported as indicators below
         else:
             indicator(m.url, f"[url:value = '{esc(m.url)}']", f"Phishing URL {m.domain}")
     for ip in _entities(members, "ip"):
         indicator(ip, f"[ipv4-addr:value = '{ip}']", f"Hosting IP {ip}")
     for upi in _entities(members, "upi_id"):
         indicator(upi, f"[x-upi-handle:value = '{esc(upi)}']", f"Mule UPI handle {upi}")
+    for phone in _entities(members, "phone"):
+        indicator(phone, f"[x-phone-number:value = '{esc(phone)}']", f"Fraud phone number {phone}")
     return {"type": "bundle", "id": _stix_id("bundle", campaign.id + now), "objects": objects}
 
 
@@ -286,7 +290,7 @@ def markdown_dossier(campaign: Campaign, members: list[Candidate], plan: Takedow
     lines = [f"# {campaign.name}", "",
              f"- Campaign id: `{campaign.id}`",
              f"- Assets: {campaign.size} ({sum(m.kind == 'web' for m in members)} sites, "
-             f"{sum(m.kind == 'app' for m in members)} apps)",
+             f"{sum(m.kind == 'app' for m in members)} apps, {sum(m.kind == 'message' for m in members)} messages)",
              f"- First seen: {campaign.first_seen:%Y-%m-%d %H:%M} UTC; "
              f"last seen {campaign.last_seen:%Y-%m-%d %H:%M} UTC",
              "", "## Linking evidence", ""]
@@ -295,7 +299,12 @@ def markdown_dossier(campaign: Campaign, members: list[Candidate], plan: Takedow
               "|---|---|---|---|---|---|"]
     for m in sorted(members, key=lambda x: -x.risk_score):
         top = ", ".join(s.name for s in sorted(m.signals, key=lambda s: -s.weight)[:3] if s.weight > 0)
-        asset = f"{m.app.label} ({m.app.package})" if m.kind == "app" and m.app else m.url
+        if m.kind == "app" and m.app:
+            asset = f"{m.app.label} ({m.app.package})"
+        elif m.kind == "message" and m.message:
+            asset = m.message.excerpt[:80].replace("|", "/")
+        else:
+            asset = m.url
         lines.append(f"| `{asset}` | {m.kind} | {m.risk_score:.2f} | {m.verdict} | {m.review_status} | {top} |")
     lines += ["", "## Takedown plan", ""]
     for item in plan.items:
@@ -348,6 +357,7 @@ def summary(cands: list[Candidate], campaigns: list[Campaign], cases: list[Taked
         "generated_at": now.isoformat(),
         "totals": {"candidates": len(cands), "flagged": len(flagged), "campaigns": len(campaigns),
                    "apps": sum(c.kind == "app" for c in flagged),
+                   "messages": sum(c.kind == "message" for c in flagged),
                    "live": sum(c.live is True for c in flagged), "offline": sum(c.live is False for c in flagged)},
         "verdicts": dict(Counter(c.verdict for c in cands)),
         "review": dict(Counter(c.review_status for c in cands)),

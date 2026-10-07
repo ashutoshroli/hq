@@ -92,6 +92,15 @@ except Exception:  # noqa: BLE001 - optional dependency; fall back to a heuristi
 _CC_SECOND_LEVEL = {"co", "com", "net", "org", "gov", "ac", "edu", "res", "gen", "firm", "ind"}
 
 
+def has_public_suffix(host: str) -> bool:
+    """True when ``host`` ends in a real public suffix (e.g. ``.com``, ``.co.in``, ``.top``)."""
+    host = (host or "").lower().rstrip(".")
+    if _EXTRACT is None:
+        return bool(re.fullmatch(r"(?:[a-z0-9-]+\.)+[a-z]{2,24}", host))
+    ext = _EXTRACT(host)
+    return bool(ext.suffix and (ext.domain or ext.subdomain))
+
+
 def registered_domain(host: str) -> str:
     """Return the registrable domain (eTLD+1), e.g. ``a.b.sbi.co.in`` -> ``sbi.co.in``."""
     host = (host or "").lower().rstrip(".")
