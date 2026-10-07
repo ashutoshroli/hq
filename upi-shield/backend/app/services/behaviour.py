@@ -14,7 +14,6 @@ Tells detected:
 import logging
 import re
 from html.parser import HTMLParser
-from typing import Optional
 from urllib.parse import urljoin, urlparse
 
 from app.schemas import Signal

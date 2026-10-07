@@ -10,9 +10,9 @@ FetchResult (html='' and empty collections) and never raises.
 """
 import hashlib
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
-from typing import Callable, Optional
 from urllib.parse import urljoin
 
 logger = logging.getLogger(__name__)
@@ -30,8 +30,8 @@ class FetchResult:
     html: str = ""
     forms: list[dict] = field(default_factory=list)
     external_script_srcs: list[str] = field(default_factory=list)
-    favicon_href: Optional[str] = None
-    favicon_hash: Optional[str] = None
+    favicon_href: str | None = None
+    favicon_hash: str | None = None
     ok: bool = False
 
 
@@ -42,10 +42,10 @@ class _PageParser(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.forms: list[dict] = []
         self.script_srcs: list[str] = []
-        self.favicon_href: Optional[str] = None
-        self._cur_form: Optional[dict] = None
+        self.favicon_href: str | None = None
+        self._cur_form: dict | None = None
 
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, Optional[str]]]) -> None:
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         a = {k.lower(): (v or "") for k, v in attrs}
         if tag == "form":
             self._cur_form = {"action": a.get("action", ""),
@@ -67,7 +67,7 @@ class _PageParser(HTMLParser):
             self._cur_form = None
 
 
-def parse_html(html: str, base_url: str = "") -> tuple[list[dict], list[str], Optional[str]]:
+def parse_html(html: str, base_url: str = "") -> tuple[list[dict], list[str], str | None]:
     """Parse HTML into (forms, external_script_srcs, favicon_href). External scripts
     are those whose src host differs from the page host (or are protocol-relative)."""
     parser = _PageParser()
@@ -79,9 +79,9 @@ def parse_html(html: str, base_url: str = "") -> tuple[list[dict], list[str], Op
     base_host = _host(base_url)
     external = []
     for src in parser.script_srcs:
-        if src.startswith("//") or src.startswith("http"):
-            if not base_host or _host(urljoin(base_url, src)) != base_host:
-                external.append(src)
+        is_absolute = src.startswith(("//", "http"))
+        if is_absolute and (not base_host or _host(urljoin(base_url, src)) != base_host):
+            external.append(src)
     return parser.forms, external, parser.favicon_href
 
 
@@ -93,7 +93,7 @@ def _host(url: str) -> str:
         return ""
 
 
-def _try_playwright(url: str, timeout: float) -> Optional[FetchResult]:
+def _try_playwright(url: str, timeout: float) -> FetchResult | None:
     """Optional Playwright render. Returns None if playwright/browser unavailable."""
     try:
         from playwright.sync_api import sync_playwright  # type: ignore
@@ -126,7 +126,7 @@ def _try_playwright(url: str, timeout: float) -> Optional[FetchResult]:
         return None
 
 
-def _fetch_favicon_hash(client, base_url: str, favicon_href: Optional[str]) -> Optional[str]:
+def _fetch_favicon_hash(client, base_url: str, favicon_href: str | None) -> str | None:
     """Best-effort favicon fetch -> stable hash, so the favicon-reuse visual signal and
     favicon_hash linking entity actually fire on a real fetch. Falls back to the
     conventional /favicon.ico when no <link rel=icon> was declared. Never raises;
@@ -149,7 +149,7 @@ def _httpx_fetch(url: str, timeout: float) -> FetchResult:
                       headers={"User-Agent": "upi-shield-fetcher/1.0"}) as client:
         resp = client.get(url)
         chain = [str(h.url) for h in resp.history] + [str(resp.url)]
-        html = resp.text if "text/html" in resp.headers.get("content-type", "") or not resp.headers.get("content-type") else resp.text
+        html = resp.text
         forms, external, favicon = parse_html(html, str(resp.url))
         favicon_hash = _fetch_favicon_hash(client, str(resp.url), favicon)
         return FetchResult(url=url, final_url=str(resp.url), redirect_chain=chain,
@@ -159,7 +159,7 @@ def _httpx_fetch(url: str, timeout: float) -> FetchResult:
 
 
 def fetch(url: str, timeout: float = DEFAULT_TIMEOUT, use_playwright: bool = False,
-          fetch_fn: Optional[Callable[[str, float], FetchResult]] = None) -> FetchResult:
+          fetch_fn: Callable[[str, float], FetchResult] | None = None) -> FetchResult:
     """Fetch a URL best-effort. Never raises; returns typed-empty FetchResult on failure.
 
     `fetch_fn` is injectable for tests (bypasses all network). `use_playwright` opts into

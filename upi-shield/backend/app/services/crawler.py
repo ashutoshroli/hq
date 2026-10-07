@@ -10,7 +10,7 @@ On ANY failure (timeout, bad JSON, HTTP error) we log and return [] -- never rai
 """
 import json
 import logging
-from typing import Callable, Iterable, Optional
+from collections.abc import Callable, Iterable
 
 from app.services import url_features
 
@@ -74,7 +74,7 @@ def _is_lookalike(host: str) -> bool:
 
 def discover_from_ct(
     domains_or_keywords: Iterable[str],
-    fetch_fn: Optional[FetchFn] = None,
+    fetch_fn: FetchFn | None = None,
     base_url: str = CRTSH_BASE,
 ) -> list[str]:
     """Discover brand-lookalike hostnames from CT logs for each query term.

@@ -2,7 +2,6 @@
 from app.services import visual
 from app.services.fetcher import FetchResult
 
-
 CLONE_HTML = """
 <html><head><title>PhonePe | Secure UPI Payments</title>
 <link rel="icon" href="/favicon.ico"></head>

@@ -1,5 +1,7 @@
-﻿__pycache__/
+__pycache__/
 *.pyc
 .venv/
 .env
-.python-version
+.pytest_cache/
+.ruff_cache/
+.agents/

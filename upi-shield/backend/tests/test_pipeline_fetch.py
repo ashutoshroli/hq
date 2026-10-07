@@ -2,7 +2,6 @@
 from app.services import pipeline
 from app.services.fetcher import FetchResult
 
-
 CLONE_HTML = """
 <html><head><title>PhonePe Secure UPI</title></head><body>
 <p>Login to PhonePe and enter your UPI PIN to make a secure payment via UPI wallet.</p>

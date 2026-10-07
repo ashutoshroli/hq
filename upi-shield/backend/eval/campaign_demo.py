@@ -16,9 +16,10 @@ Run: ``python -m eval.campaign_demo``  (from backend/, with the venv active).
 """
 from __future__ import annotations
 
+from datetime import UTC
+
 from app.schemas import Candidate, Entity
 from app.services import clustering, pipeline, takedown
-
 from eval import dataset
 from eval.evaluate import _build_fetch_result
 
@@ -40,8 +41,8 @@ def build_candidates() -> list[Candidate]:
         cand.id = f"eval{idx:02d}"
         cands.append(cand)
     # Stable, monotonically increasing first_seen so clustering ordering is fixed.
-    from datetime import datetime, timedelta, timezone
-    base = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    from datetime import datetime, timedelta
+    base = datetime(2024, 1, 1, tzinfo=UTC)
     for i, c in enumerate(cands):
         c.first_seen = base + timedelta(minutes=i)
     return cands
@@ -52,7 +53,7 @@ def main() -> None:
     campaigns = clustering.build_campaigns(cands)
     by_id = {c.id: c for c in cands}
 
-    print(f"\nUPI Shield campaign-clustering demo")
+    print("\nUPI Shield campaign-clustering demo")
     print(f"Ingested {len(cands)} labelled phishing candidates "
           f"-> discovered {len(campaigns)} campaign(s).")
     print("=" * 72)

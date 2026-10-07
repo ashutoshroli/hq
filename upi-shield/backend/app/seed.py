@@ -1,6 +1,6 @@
 """Demo data so the dashboard has something to show before the real crawler works.
 Two campaigns: one linked by a shared UPI ID + favicon, one by a shared IP + phone."""
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from app.schemas import Candidate, Entity, Signal
 from app.store import store
@@ -9,7 +9,7 @@ from app.store import store
 def _c(i, url, domain, brand, score, ents, minutes_ago, source="ct_log"):
     return Candidate(
         id=f"seed{i}", url=url, domain=domain, source=source,
-        first_seen=datetime.now(timezone.utc) - timedelta(minutes=minutes_ago),
+        first_seen=datetime.now(UTC) - timedelta(minutes=minutes_ago),
         risk_score=score, verdict="malicious" if score >= 0.7 else "suspicious",
         brand_matched=brand, visual_similarity=round(min(0.99, score + 0.1), 2),
         signals=[Signal(name="brand_in_unofficial_domain", weight=0.5, detail=f"'{brand}' in {domain}"),

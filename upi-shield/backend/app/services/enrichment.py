@@ -14,7 +14,7 @@ import logging
 import re
 import socket
 import ssl
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from app.schemas import Entity
 
@@ -37,13 +37,13 @@ _UA_RE = re.compile(r"\b(UA-\d{4,}-\d+)\b")
 _GTAG_RE = re.compile(r"""(?:^|["'=:/(,])((?:G-[A-Z0-9]{8,10})|(?:GTM-[A-Z0-9]{6,7}))(?=["'<&);\s]|$)""")
 
 # Type aliases for the injectable resolvers.
-IPResolver = Callable[[str], Optional[str]]
-ASNResolver = Callable[[str], Optional[str]]
-CertResolver = Callable[[str], Optional[str]]
-RegistrarResolver = Callable[[str], Optional[str]]
+IPResolver = Callable[[str], str | None]
+ASNResolver = Callable[[str], str | None]
+CertResolver = Callable[[str], str | None]
+RegistrarResolver = Callable[[str], str | None]
 
 
-def _default_ip_resolver(host: str) -> Optional[str]:
+def _default_ip_resolver(host: str) -> str | None:
     """Resolve a hostname to an IPv4 address via stdlib socket. Network, best-effort."""
     try:
         return socket.gethostbyname(host)
@@ -52,7 +52,7 @@ def _default_ip_resolver(host: str) -> Optional[str]:
         return None
 
 
-def _default_asn_resolver(ip: str) -> Optional[str]:
+def _default_asn_resolver(ip: str) -> str | None:
     """Resolve an IP to an ASN. No lightweight stdlib way, so default to None.
 
     Kept injectable so deployments can wire in a Team Cymru / RDAP lookup without
@@ -61,7 +61,7 @@ def _default_asn_resolver(ip: str) -> Optional[str]:
     return None
 
 
-def _default_cert_resolver(host: str) -> Optional[str]:
+def _default_cert_resolver(host: str) -> str | None:
     """Fetch the TLS leaf cert for ``host`` and return a sha256 fingerprint.
 
     Uses stdlib ssl; network, best-effort. Returns None on any failure.
@@ -78,7 +78,7 @@ def _default_cert_resolver(host: str) -> Optional[str]:
         return None
 
 
-def _default_registrar_resolver(host: str) -> Optional[str]:
+def _default_registrar_resolver(host: str) -> str | None:
     """Optional WHOIS registrar lookup. python-whois is not a hard dependency, so
     this imports lazily and returns None when the library is absent or lookup fails."""
     try:
@@ -117,7 +117,7 @@ def scrape_analytics_ids(html: str) -> list[str]:
     return seen
 
 
-def enrich(host: str, fetch_result=None, resolvers: Optional[dict] = None) -> list[Entity]:
+def enrich(host: str, fetch_result=None, resolvers: dict | None = None) -> list[Entity]:
     """Resolve ``host`` to infrastructure entities. Never raises.
 
     Args:
@@ -142,7 +142,7 @@ def enrich(host: str, fetch_result=None, resolvers: Optional[dict] = None) -> li
         # Still scrape analytics even without a host, but there is nothing to resolve.
         host = ""
 
-    ip: Optional[str] = None
+    ip: str | None = None
     if host:
         try:
             ip = ip_resolver(host)

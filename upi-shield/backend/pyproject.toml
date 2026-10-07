@@ -1,0 +1,26 @@
+[project]
+name = "upi-shield-backend"
+version = "0.2.0"
+description = "Detection, clustering and takedown backend for fake UPI and payment pages and apps."
+requires-python = ">=3.11"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+extend-exclude = [".venv"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+ignore = [
+    "B008",  # FastAPI dependency defaults (Query/Depends) are idiomatic
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app", "eval"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = [
+    "ignore::DeprecationWarning:fastapi.*",
+]

@@ -34,7 +34,7 @@ small number of campaigns, demonstrating the infrastructure-graph deliverable.
 """
 from __future__ import annotations
 
-from typing import Optional, TypedDict
+from typing import TypedDict
 
 
 class Page(TypedDict, total=False):
@@ -45,8 +45,8 @@ class Page(TypedDict, total=False):
     html: str
     forms: list[dict]
     external_script_srcs: list[str]
-    favicon_href: Optional[str]
-    favicon_hash: Optional[str]
+    favicon_href: str | None
+    favicon_hash: str | None
 
 
 class Item(TypedDict, total=False):

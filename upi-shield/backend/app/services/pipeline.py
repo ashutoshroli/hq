@@ -7,7 +7,7 @@
 import logging
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.schemas import Candidate, Entity, Signal, SourceType
 from app.services import behaviour, enrichment, fetcher, url_features, visual
@@ -38,8 +38,8 @@ def analyze_url(url: str, source: SourceType, extra_entities: list[Entity] | Non
         if len(result.redirect_chain) > 1:
             signals.append(Signal(
                 name="redirect_chain", weight=0.1,
-                detail="Redirects through %d hops: %s" % (
-                    len(result.redirect_chain), " -> ".join(result.redirect_chain)),
+                detail=f"Redirects through {len(result.redirect_chain)} hops: "
+                       + " -> ".join(result.redirect_chain),
             ))
         if result.favicon_hash:
             entities.append(Entity(type="favicon_hash", value=result.favicon_hash))
@@ -71,7 +71,7 @@ def analyze_url(url: str, source: SourceType, extra_entities: list[Entity] | Non
 
     return Candidate(
         id=uuid.uuid4().hex[:8], url=url, domain=host, source=source,
-        first_seen=datetime.now(timezone.utc), risk_score=round(score, 3),
+        first_seen=datetime.now(UTC), risk_score=round(score, 3),
         verdict=url_features.verdict_for(score), brand_matched=brand,
         visual_similarity=visual_similarity,
         signals=signals, entities=entities, screenshot_url=screenshot_url,

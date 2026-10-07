@@ -8,7 +8,6 @@ Documented floors (achieved on the committed labelled sample, 31 items):
   full        precision 1.000  recall 1.000  f1 1.000
 The full stage must keep precision AND recall each >= 0.70.
 """
-import importlib
 import os
 
 from fastapi.testclient import TestClient
