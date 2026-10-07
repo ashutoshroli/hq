@@ -1,4 +1,5 @@
-"""Takedown report text per recipient. Extend with WHOIS/hosting contacts and screenshots."""
+"""Takedown report text per recipient (registrar, hosting, brand, NPCI, CERT-In, browsers,
+app stores, the national cybercrime portal and telecom regulators)."""
 import re
 from datetime import UTC, datetime
 
@@ -13,6 +14,10 @@ INTRO = {
     "safe_browsing": "Please add the URLs below to the phishing blocklist.",
     "app_store": ("Please remove the Android applications below and flag them in Google Play Protect. "
                   "They impersonate payment brands to steal UPI credentials and OTPs."),
+    "cybercrime_portal": ("Complaint regarding an organised online financial fraud campaign that impersonates "
+                          "Indian payment brands through the websites, apps and payment handles listed below."),
+    "telecom": ("The phone numbers below are advertised on fraudulent payment pages as contact numbers. "
+                "Please investigate and disconnect them."),
 }
 
 
@@ -26,12 +31,14 @@ RECIPIENT_ENTITY_TYPES: dict[Recipient, tuple[str, ...]] = {
     "cert_in": ("ip", "asn", "registrar", "upi_id", "phone"),
     "safe_browsing": (),  # URLs are listed from members below, not shared entities
     "app_store": ("signing_cert", "package_name", "domain"),
+    "cybercrime_portal": ("upi_id", "phone", "telegram", "ip"),
+    "telecom": ("phone",),
 }
 
 # Recipients who need the concrete domains being taken down. 'domain' is unique per
 # candidate (never a shared entity), so it is read from members (like safe_browsing
 # reads URLs) rather than from campaign.shared_entities.
-RECIPIENT_WANTS_DOMAINS: frozenset[Recipient] = frozenset({"registrar", "cert_in"})
+RECIPIENT_WANTS_DOMAINS: frozenset[Recipient] = frozenset({"registrar", "cert_in", "cybercrime_portal"})
 
 # Human-readable label for the recipient-specific context header.
 RECIPIENT_CONTEXT_LABEL: dict[Recipient, str] = {
@@ -42,6 +49,8 @@ RECIPIENT_CONTEXT_LABEL: dict[Recipient, str] = {
     "cert_in": "Infrastructure context",
     "safe_browsing": "URLs to blocklist",
     "app_store": "Application context",
+    "cybercrime_portal": "Payment and contact identifiers",
+    "telecom": "Fraud phone numbers",
 }
 
 

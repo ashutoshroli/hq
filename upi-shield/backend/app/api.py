@@ -3,13 +3,15 @@ import logging
 import os
 import re
 import uuid
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
 
 from app.config import get_settings
 from app.jobs import jobs
 from app.schemas import (
+    AuditEvent,
     Campaign,
     Candidate,
     CrawlRequest,
@@ -22,12 +24,17 @@ from app.schemas import (
     IngestResponse,
     IngestUrlRequest,
     Job,
+    ReviewRequest,
     StageMetrics,
+    TakedownCase,
+    TakedownCreateRequest,
+    TakedownPlan,
     TakedownReport,
     TakedownRequest,
+    TakedownUpdateRequest,
 )
 from app.seed import seed
-from app.services import apps, ingest, takedown
+from app.services import apps, casework, ingest, takedown
 from app.services import graph as graph_service
 from app.store import store
 
@@ -206,13 +213,118 @@ def pivot(type: str = Query(..., description="Entity type, e.g. upi_id"), value:
 
 # --- reporting ----------------------------------------------------------------------
 
-@router.post("/reports/takedown", response_model=TakedownReport, dependencies=write, tags=["reporting"])
-def takedown_report(req: TakedownRequest):
-    camp = next((c for c in store.campaigns if c.id == req.campaign_id), None)
+def _campaign(camp_id: str):
+    camp = next((c for c in store.campaigns if c.id == camp_id), None)
     if camp is None:
         raise HTTPException(404, "campaign not found")
-    members = [store.candidates[i] for i in camp.candidate_ids]
-    return takedown.generate(camp, members, req.recipient)
+    return camp, [store.candidates[i] for i in camp.candidate_ids]
+
+
+@router.post("/reports/takedown", response_model=TakedownReport, dependencies=write, tags=["reporting"])
+def takedown_report(req: TakedownRequest):
+    camp, members = _campaign(req.campaign_id)
+    return takedown.generate(camp, [m for m in members if m.review_status != "false_positive"], req.recipient)
+
+
+# --- analyst workflow ---------------------------------------------------------------
+
+@router.post("/candidates/{cid}/review", response_model=Candidate, dependencies=write, tags=["workflow"])
+def review_candidate(cid: str, req: ReviewRequest):
+    """Record an analyst decision. False positives leave campaigns and takedown reports."""
+    cand = store.candidates.get(cid)
+    if cand is None:
+        raise HTTPException(404, "candidate not found")
+    previous = cand.review_status
+    updated = cand.model_copy(update={"review_status": req.status, "review_note": req.note,
+                                      "reviewed_by": req.analyst, "reviewed_at": datetime.now(UTC)})
+    store.update(updated)
+    store.audit(req.analyst, "candidate.review", cid, {"from": previous, "to": req.status, "note": req.note})
+    return store.candidates[cid]
+
+
+@router.get("/audit", response_model=list[AuditEvent], tags=["workflow"])
+def audit_log(target: str | None = None, limit: int = Query(200, ge=1, le=1000)):
+    return store.audit_log(target, limit)
+
+
+@router.get("/campaigns/{camp_id}/takedown-plan", response_model=TakedownPlan, tags=["workflow"])
+def takedown_plan(camp_id: str):
+    """Who to contact (registrar, host, brand, NPCI, CERT-In, ...) about which targets."""
+    camp, members = _campaign(camp_id)
+    return casework.takedown_plan(camp, members)
+
+
+@router.post("/takedowns", response_model=TakedownCase, status_code=201, dependencies=write, tags=["workflow"])
+def create_takedown(req: TakedownCreateRequest):
+    """Open a tracked takedown case with its generated report."""
+    camp, members = _campaign(req.campaign_id)
+    case = store.save_takedown(casework.create_case(camp, members, req.recipient, req.contact))
+    store.audit(req.analyst, "takedown.create", case.id, {"campaign_id": camp.id, "recipient": req.recipient,
+                                                           "contact": case.contact})
+    return case
+
+
+@router.get("/takedowns", response_model=list[TakedownCase], tags=["workflow"])
+def list_takedowns(campaign_id: str | None = None, status: str | None = None):
+    return [c for c in store.list_takedowns(campaign_id) if status is None or c.status == status]
+
+
+def _case(case_id: str) -> TakedownCase:
+    case = store.get_takedown(case_id)
+    if case is None:
+        raise HTTPException(404, "takedown not found")
+    return case
+
+
+@router.get("/takedowns/{case_id}", response_model=TakedownCase, tags=["workflow"])
+def get_takedown(case_id: str):
+    return _case(case_id)
+
+
+@router.patch("/takedowns/{case_id}", response_model=TakedownCase, dependencies=write, tags=["workflow"])
+def update_takedown(case_id: str, req: TakedownUpdateRequest):
+    case = _case(case_id)
+    previous = case.status
+    store.save_takedown(casework.apply_status(case, req.status, req.note))
+    store.audit(req.analyst, "takedown.status", case_id, {"from": previous, "to": req.status, "note": req.note})
+    return case
+
+
+@router.post("/takedowns/{case_id}/recheck", response_model=TakedownCase, dependencies=write, tags=["workflow"])
+def recheck_takedown(case_id: str):
+    """Probe every target; the case resolves automatically when all are offline."""
+    case = _case(case_id)
+    previous, before = case.status, len(case.checks)
+    store.save_takedown(casework.recheck(case))
+    latest = case.checks[before:]
+    store.audit("system", "takedown.recheck", case_id, {"from": previous, "to": case.status, "checked": len(latest),
+                                                        "live": sum(c.live for c in latest)})
+    return case
+
+
+@router.get("/campaigns/{camp_id}/export", tags=["reporting"])
+def export_campaign(camp_id: str, format: str = Query("markdown", pattern="^(markdown|json|stix|zip)$")):
+    """Evidence export: Markdown dossier, JSON, STIX 2.1 bundle, or a ZIP evidence package."""
+    camp, members = _campaign(camp_id)
+    plan = casework.takedown_plan(camp, members)
+    cases = store.list_takedowns(camp_id)
+    if format == "markdown":
+        return PlainTextResponse(casework.markdown_dossier(camp, members, plan, cases), media_type="text/markdown")
+    if format == "stix":
+        return JSONResponse(casework.stix_bundle(camp, members))
+    if format == "json":
+        return JSONResponse({"campaign": camp.model_dump(mode="json"),
+                             "members": [m.model_dump(mode="json") for m in members],
+                             "plan": plan.model_dump(mode="json"), "cases": [c.model_dump(mode="json") for c in cases]})
+    data = casework.evidence_zip(camp, members, plan, cases, get_settings().evidence_dir)
+    return Response(data, media_type="application/zip",
+                    headers={"Content-Disposition": f'attachment; filename="{camp_id}-evidence.zip"'})
+
+
+@router.get("/dashboard/summary", tags=["workflow"])
+def dashboard_summary(days: int = Query(14, ge=1, le=90)):
+    """Overview for the analyst dashboard: totals, trends, review queue and takedown SLA."""
+    return casework.summary(list(store.candidates.values()), store.campaigns, store.list_takedowns(), days)
 
 
 @router.get("/eval/metrics", response_model=EvalMetrics, tags=["reporting"])

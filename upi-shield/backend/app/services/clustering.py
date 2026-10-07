@@ -2,7 +2,8 @@
 
 Campaign ids are stable: each campaign is named after a hash of its anchor member
 (the earliest-seen candidate), so ids do not shift when unrelated candidates are
-ingested. Candidates with a ``benign`` verdict never take part in clustering.
+ingested. Candidates with a ``benign`` verdict, or reviewed as false positives, never
+take part in clustering.
 """
 import hashlib
 from collections import defaultdict
@@ -59,7 +60,7 @@ def campaign_id_for(anchor: Candidate) -> str:
 
 
 def build_campaigns(cands: list[Candidate]) -> list[Campaign]:
-    cands = [c for c in cands if c.verdict != "benign"]
+    cands = [c for c in cands if c.verdict != "benign" and c.review_status != "false_positive"]
     parent = {c.id: c.id for c in cands}
 
     def find(x: str) -> str:

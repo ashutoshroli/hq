@@ -11,8 +11,11 @@ EntityType = Literal[
     "upi_id", "phone", "telegram", "favicon_hash", "analytics_id",
     "package_name", "apk_sha256", "signing_cert",
 ]
-Recipient = Literal["registrar", "hosting", "bank", "npci", "cert_in", "safe_browsing", "app_store"]
+Recipient = Literal["registrar", "hosting", "bank", "npci", "cert_in", "safe_browsing", "app_store",
+                    "cybercrime_portal", "telecom"]
 CandidateKind = Literal["web", "app"]
+ReviewStatus = Literal["unreviewed", "confirmed", "false_positive", "escalated"]
+TakedownStatus = Literal["drafted", "sent", "acknowledged", "resolved", "rejected"]
 
 
 class Entity(BaseModel):
@@ -72,6 +75,11 @@ class Candidate(BaseModel):
     kind: CandidateKind = "web"  # "app" for Android APK candidates (url is android://<package>)
     app: AppSummary | None = None
     infrastructure: InfrastructureSummary | None = None
+    # Analyst review (v0.2). False positives are excluded from campaigns and reports.
+    review_status: ReviewStatus = "unreviewed"
+    review_note: str | None = None
+    reviewed_by: str | None = None
+    reviewed_at: datetime | None = None
 
 
 class IngestUrlRequest(BaseModel):
@@ -224,3 +232,68 @@ class EvalMetrics(BaseModel):
     is_placeholder: bool  # True until eval/evaluate.py writes real numbers
     stages: list[StageMetrics]  # controlled fixture sample (page-level, all stages)
     benchmarks: list[BenchmarkMetrics] = []  # real-world samples (additive, v0.2)
+
+
+class ReviewRequest(BaseModel):
+    status: ReviewStatus
+    note: str | None = Field(default=None, max_length=2000)
+    analyst: str = Field(default="analyst", max_length=120)
+
+
+class AuditEvent(BaseModel):
+    id: str
+    at: datetime
+    actor: str
+    action: str  # e.g. "candidate.review", "takedown.create", "takedown.status"
+    target: str  # id of the affected candidate / campaign / takedown
+    detail: dict = {}
+
+
+class TakedownPlanItem(BaseModel):
+    recipient: Recipient
+    channel: str  # "email", "web_form" or "phone"
+    contacts: list[str]
+    targets: list[str]  # what this recipient is asked to act on
+    rationale: str
+
+
+class TakedownPlan(BaseModel):
+    campaign_id: str
+    generated_at: datetime
+    items: list[TakedownPlanItem]
+
+
+class TakedownCreateRequest(BaseModel):
+    campaign_id: str
+    recipient: Recipient
+    contact: str | None = None  # defaults to the first contact in the takedown plan
+    analyst: str = Field(default="analyst", max_length=120)
+
+
+class TakedownUpdateRequest(BaseModel):
+    status: TakedownStatus
+    note: str | None = Field(default=None, max_length=2000)
+    analyst: str = Field(default="analyst", max_length=120)
+
+
+class TargetCheck(BaseModel):
+    target: str
+    checked_at: datetime
+    live: bool
+    detail: str
+
+
+class TakedownCase(BaseModel):
+    id: str
+    campaign_id: str
+    recipient: Recipient
+    contact: str | None = None
+    status: TakedownStatus = "drafted"
+    targets: list[str] = []
+    report: TakedownReport
+    created_at: datetime
+    updated_at: datetime
+    sent_at: datetime | None = None
+    resolved_at: datetime | None = None
+    checks: list[TargetCheck] = []
+    notes: list[str] = []

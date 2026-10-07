@@ -25,6 +25,8 @@ class Brand:
     reference_urls: tuple[str, ...] = field(default=())
     # Official Google Play developer account names (exact, as shown on the listing).
     play_developers: tuple[str, ...] = ()
+    # Phishing-report contacts published by the brand itself (verified on its own site).
+    abuse_contacts: tuple[str, ...] = ()
 
 
 BRANDS: dict[str, Brand] = {b.key: b for b in [
@@ -68,14 +70,16 @@ BRANDS: dict[str, Brand] = {b.key: b for b in [
           ("hdfc bank limited",),
           ("com.hdfcbank.android.now", "com.snapwork.hdfc", "com.hdfcbank.payzapp"),
           ("https://www.hdfcbank.com/", "https://www.hdfcbank.com/personal"),
-          ("HDFC BANK", "HDFC Bank Limited")),
+          ("HDFC BANK", "HDFC Bank Limited"),
+          ("report.phishingsite@hdfc.bank.in",)),
     Brand("icici", "ICICI Bank", ("icici",),
           frozenset({"icicibank.com", "icici.bank.in", "icicibank.co.in", "icicidirect.com", "iciciprulife.com",
                      "icicilombard.com", "icicipruamc.com", "icicisecurities.com"}),
           ("icici bank limited",),
           ("com.csam.icici.bank.imobile",),
           ("https://www.icicibank.com/",),
-          ("ICICI Bank Ltd.",)),
+          ("ICICI Bank Ltd.",),
+          ("antiphishing@icicibank.com",)),
     Brand("axisbank", "Axis Bank", ("axisbank",),
           frozenset({"axisbank.com", "axis.bank.in", "axisbank.co.in", "axismf.com", "axisdirect.in"}),
           ("axis bank limited",),
