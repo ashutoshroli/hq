@@ -1,0 +1,6 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pydantic>=2.6
+httpx>=0.27      # tests (TestClient)
+pytest>=8.0
+# add later: playwright, tldextract, python-whois, faiss-cpu, open_clip_torch, networkx
