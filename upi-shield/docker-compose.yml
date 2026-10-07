@@ -12,5 +12,10 @@ services:
     volumes:
       - shield-data:/srv/data
 
+  dashboard:
+    build: ./frontend
+    ports: ["8080:8080"]
+    depends_on: [api]
+
 volumes:
   shield-data:
