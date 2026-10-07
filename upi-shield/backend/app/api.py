@@ -1,3 +1,6 @@
+import json
+import logging
+import os
 import uuid
 from datetime import datetime, timezone
 
@@ -10,7 +13,18 @@ from app.seed import seed
 from app.services import extractor, pipeline, takedown
 from app.store import store
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
+
+# eval/evaluate.py writes real precision/recall here (backend/eval/metrics.json).
+# /eval/metrics loads it when present and falls back to a placeholder otherwise.
+_METRICS_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "eval", "metrics.json")
+
+_PLACEHOLDER_METRICS = EvalMetrics(sample_size=0, is_placeholder=True, stages=[
+    StageMetrics(stage="url_only", precision=0.0, recall=0.0, f1=0.0),
+    StageMetrics(stage="url+visual", precision=0.0, recall=0.0, f1=0.0),
+    StageMetrics(stage="full", precision=0.0, recall=0.0, f1=0.0),
+])
 
 
 @router.get("/health")
@@ -91,12 +105,16 @@ def takedown_report(req: TakedownRequest):
 
 @router.get("/eval/metrics", response_model=EvalMetrics)
 def eval_metrics():
-    # PLACEHOLDER numbers so the dashboard can render. Replace by loading the output of eval/evaluate.py.
-    return EvalMetrics(sample_size=0, is_placeholder=True, stages=[
-        StageMetrics(stage="url_only", precision=0.0, recall=0.0, f1=0.0),
-        StageMetrics(stage="url+visual", precision=0.0, recall=0.0, f1=0.0),
-        StageMetrics(stage="full", precision=0.0, recall=0.0, f1=0.0),
-    ])
+    """Return real metrics from eval/metrics.json when present (is_placeholder=false),
+    otherwise a placeholder (is_placeholder=true) so the dashboard never errors.
+    Regenerate the artifact with `python -m eval.evaluate`."""
+    try:
+        if os.path.exists(_METRICS_PATH):
+            with open(_METRICS_PATH, encoding="utf-8") as fh:
+                return EvalMetrics(**json.load(fh))
+    except Exception as exc:  # noqa: BLE001 - never let a bad artifact break the endpoint
+        logger.warning("eval_metrics: failed to load %s: %s", _METRICS_PATH, exc)
+    return _PLACEHOLDER_METRICS
 
 
 @router.post("/admin/seed")
