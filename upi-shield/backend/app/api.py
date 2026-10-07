@@ -14,8 +14,6 @@ from app.schemas import (
     Candidate,
     CrawlRequest,
     EvalMetrics,
-    GraphEdge,
-    GraphNode,
     GraphResponse,
     IngestAppUrlRequest,
     IngestBatchRequest,
@@ -30,6 +28,7 @@ from app.schemas import (
 )
 from app.seed import seed
 from app.services import apps, ingest, takedown
+from app.services import graph as graph_service
 from app.store import store
 
 logger = logging.getLogger(__name__)
@@ -192,17 +191,17 @@ def get_campaign(camp_id: str):
 
 
 @router.get("/graph", response_model=GraphResponse, tags=["analysis"])
-def graph(campaign_id: str | None = None):
-    cands = [c for c in store.candidates.values() if campaign_id is None or c.campaign_id == campaign_id]
-    nodes: dict[str, GraphNode] = {}
-    edges: list[GraphEdge] = []
-    for c in cands:
-        for e in c.entities:
-            nid = f"{e.type}:{e.value}"
-            nodes.setdefault(nid, GraphNode(id=nid, type=e.type, label=e.value, campaign_id=c.campaign_id))
-            if e.type != "domain":
-                edges.append(GraphEdge(source=f"domain:{c.domain}", target=nid, relation="uses"))
-    return GraphResponse(nodes=list(nodes.values()), edges=edges)
+def graph(campaign_id: str | None = None, include_benign: bool = False):
+    """Infrastructure graph of sites, apps and the entities that link them."""
+    cands = [c for c in store.candidates.values()
+             if (campaign_id is None or c.campaign_id == campaign_id) and (include_benign or c.verdict != "benign")]
+    return graph_service.build_graph(cands)
+
+
+@router.get("/pivot", response_model=list[Candidate], tags=["analysis"])
+def pivot(type: str = Query(..., description="Entity type, e.g. upi_id"), value: str = Query(...)):
+    """All candidates that use a given entity (e.g. every site collecting to one UPI handle)."""
+    return graph_service.pivot(list(store.candidates.values()), type, value)
 
 
 # --- reporting ----------------------------------------------------------------------

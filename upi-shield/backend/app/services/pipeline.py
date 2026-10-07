@@ -146,6 +146,12 @@ def analyze_url(url: str, source: SourceType, extra_entities: list[Entity] | Non
                 seen.add(key)
                 entities.append(e)
 
+    infra = None
+    if should_fetch:
+        infra = enrichment.infrastructure(host, next((e.value for e in entities if e.type == "ip"), None))
+        if infra and infra.asn and not any(e.type == "asn" for e in entities):
+            entities.append(Entity(type="asn", value=infra.asn))
+
     # risk_score = clamped sum of all signal weights; verdict recomputed from it.
     score = min(1.0, sum(s.weight for s in signals))
 
@@ -154,5 +160,5 @@ def analyze_url(url: str, source: SourceType, extra_entities: list[Entity] | Non
         first_seen=datetime.now(UTC), risk_score=round(score, 3),
         verdict=url_features.verdict_for(score), brand_matched=brand,
         visual_similarity=visual_similarity,
-        signals=signals, entities=entities, screenshot_url=screenshot_url,
+        signals=signals, entities=entities, screenshot_url=screenshot_url, infrastructure=infra,
     )

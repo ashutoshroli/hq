@@ -32,4 +32,5 @@ def offline_lookups(monkeypatch):
     from app.services import enrichment, fetcher
 
     monkeypatch.setattr(enrichment, "domain_created", lambda domain: None)
+    monkeypatch.setattr(enrichment, "infrastructure", lambda host, ip=None: None)
     monkeypatch.setattr(fetcher, "probe", lambda url, ua, timeout=None: fetcher.FetchResult(url=url, user_agent=ua))
