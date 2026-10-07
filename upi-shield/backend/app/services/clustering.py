@@ -20,6 +20,18 @@ WEAK = {"registrar", "asn"}
 SHARED_SIGNING_CERTS = {"a40da80a59d170caa950cf15c18c454d47a39b26989d8b640ecd745ba71bf5dc"}
 
 
+# Entity types whose values are shared by every customer of a CDN / shared-hosting network.
+_SHARED_ON_CDN = {"ip", "cert_fingerprint"}
+
+
+def entity_links(entity: Entity, cand: Candidate | None = None) -> bool:
+    """Whether an entity links candidates *strongly* (merges campaigns on its own)."""
+    if not _is_linking(entity) or entity.type in WEAK:
+        return False
+    infra = getattr(cand, "infrastructure", None)
+    return not (infra is not None and infra.shared_hosting and entity.type in _SHARED_ON_CDN)
+
+
 def _is_linking(entity: Entity) -> bool:
     """Whether an entity value is specific enough to tie two candidates to one operator.
 
@@ -67,7 +79,7 @@ def build_campaigns(cands: list[Candidate]) -> list[Campaign]:
                 key = (e.type, e.value.lower() if e.type == "domain" else e.value)
                 if c.id not in by_shared[key]:
                     by_shared[key].append(c.id)
-                if e.type not in WEAK and c.id not in by_entity[key]:
+                if entity_links(e, c) and c.id not in by_entity[key]:
                     by_entity[key].append(c.id)
     for ids in by_entity.values():
         for other in ids[1:]:

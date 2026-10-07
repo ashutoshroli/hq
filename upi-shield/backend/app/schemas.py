@@ -38,6 +38,20 @@ class AppSummary(BaseModel):
     origin_url: str | None = None  # where the APK was downloaded from, when known
 
 
+class InfrastructureSummary(BaseModel):
+    """Hosting and registration facts used for takedown routing (filled when enrichment runs)."""
+    ip: str | None = None
+    asn: str | None = None  # e.g. "AS13335"
+    as_name: str | None = None
+    prefix: str | None = None
+    shared_hosting: bool = False  # CDN / shared-hosting network: the IP is not operator-specific
+    hosting_abuse_contacts: list[str] = []
+    registrar: str | None = None
+    registrar_abuse_email: str | None = None
+    registrar_abuse_phone: str | None = None
+    registered_on: datetime | None = None
+
+
 class Candidate(BaseModel):
     id: str
     url: str
@@ -57,6 +71,7 @@ class Candidate(BaseModel):
     sightings: int = 1  # how many times the URL was ingested from any source
     kind: CandidateKind = "web"  # "app" for Android APK candidates (url is android://<package>)
     app: AppSummary | None = None
+    infrastructure: InfrastructureSummary | None = None
 
 
 class IngestUrlRequest(BaseModel):
@@ -142,6 +157,14 @@ class GraphNode(BaseModel):
     type: str
     label: str
     campaign_id: str | None = None
+    # Additive (v0.2): candidate facts on site/app nodes, linking facts on entity nodes.
+    candidate_id: str | None = None
+    kind: CandidateKind | None = None
+    risk_score: float | None = None
+    verdict: Verdict | None = None
+    brand: str | None = None
+    linking: bool | None = None  # entity nodes: whether this value can tie candidates together
+    degree: int | None = None  # entity nodes: number of candidates using it
 
 
 class GraphEdge(BaseModel):

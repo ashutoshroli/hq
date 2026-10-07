@@ -18,7 +18,7 @@ from collections.abc import Callable
 from datetime import datetime
 from functools import lru_cache
 
-from app.schemas import Entity
+from app.schemas import Entity, InfrastructureSummary
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +104,14 @@ def rdap_lookup(domain: str) -> dict:
     return parse_rdap(data)
 
 
+def _vcard(entity: dict, field: str) -> str | None:
+    vcard = (entity.get("vcardArray") or [None, []])[1]
+    value = next((v[3] for v in vcard if v and v[0] == field and len(v) > 3 and v[3]), None)
+    if isinstance(value, str) and value.startswith("tel:"):
+        value = value[4:]
+    return value or None
+
+
 def parse_rdap(data: dict) -> dict:
     created = None
     for event in data.get("events", []) or []:
@@ -112,13 +120,87 @@ def parse_rdap(data: dict) -> dict:
                 created = datetime.fromisoformat(event["eventDate"].replace("Z", "+00:00"))
             except ValueError:
                 created = None
-    registrar = None
+    registrar = abuse_email = abuse_phone = None
     for entity in data.get("entities", []) or []:
         if "registrar" in (entity.get("roles") or []):
-            vcard = (entity.get("vcardArray") or [None, []])[1]
-            registrar = next((v[3] for v in vcard if v and v[0] == "fn" and len(v) > 3), None)
+            registrar = _vcard(entity, "fn")
+            for sub in entity.get("entities", []) or []:
+                if "abuse" in (sub.get("roles") or []):
+                    abuse_email = _vcard(sub, "email")
+                    abuse_phone = _vcard(sub, "tel")
             break
-    return {"created": created, "registrar": registrar}
+    out = {"created": created, "registrar": registrar}
+    if abuse_email or abuse_phone:
+        out.update({"abuse_email": abuse_email, "abuse_phone": abuse_phone})
+    return out
+
+
+# --- network ownership (RIPEstat, covers all five RIRs) ----------------------------------
+
+RIPESTAT = "https://stat.ripe.net/data/{endpoint}/data.json"
+
+# Networks whose IPs front many unrelated customers (CDNs, cloud edges, shared hosting).
+# A shared IP there says nothing about who operates a site, so it must not link campaigns.
+SHARED_INFRA_ASNS: dict[str, str] = {
+    "AS13335": "Cloudflare", "AS209242": "Cloudflare", "AS20940": "Akamai", "AS16625": "Akamai",
+    "AS54113": "Fastly", "AS15169": "Google", "AS396982": "Google Cloud", "AS16509": "Amazon",
+    "AS14618": "Amazon", "AS8075": "Microsoft", "AS36459": "GitHub", "AS47583": "Hostinger",
+    "AS26496": "GoDaddy", "AS22612": "Namecheap", "AS46606": "Unified Layer (Bluehost)",
+    "AS19527": "Google", "AS32934": "Meta", "AS60068": "CDN77", "AS21859": "Zenlayer",
+}
+
+
+@lru_cache(maxsize=4096)
+def _ripestat(endpoint: str, resource: str) -> dict:
+    try:
+        import httpx
+
+        resp = httpx.get(RIPESTAT.format(endpoint=endpoint), params={"resource": resource}, timeout=10.0,
+                         headers={"User-Agent": "upi-shield/1.0"})
+        return resp.json().get("data", {}) if resp.status_code == 200 else {}
+    except Exception as exc:  # noqa: BLE001 - best effort
+        logger.debug("enrichment: RIPEstat %s failed for %s: %s", endpoint, resource, exc)
+        return {}
+
+
+def asn_info(ip: str) -> dict:
+    """``{"asn": "AS13335", "as_name": ..., "prefix": ...}`` for an IP (empty on failure)."""
+    net = _ripestat("network-info", ip)
+    asns = net.get("asns") or []
+    if not asns:
+        return {}
+    asn = f"AS{asns[0]}"
+    holder = _ripestat("as-overview", asn).get("holder")
+    return {"asn": asn, "as_name": holder, "prefix": net.get("prefix")}
+
+
+def hosting_abuse_contacts(ip: str) -> list[str]:
+    return list(_ripestat("abuse-contact-finder", ip).get("abuse_contacts") or [])
+
+
+def _ripestat_asn_resolver(ip: str) -> str | None:
+    return asn_info(ip).get("asn")
+
+
+def infrastructure(host: str, ip: str | None = None) -> InfrastructureSummary | None:
+    """Hosting, network and registrar facts for takedown routing. Never raises."""
+    from app.services.url_features import registered_domain
+
+    try:
+        ip = ip or _default_ip_resolver(host)
+        network = asn_info(ip) if ip else {}
+        rdap = rdap_lookup(registered_domain(host))
+        summary = InfrastructureSummary(
+            ip=ip, asn=network.get("asn"), as_name=network.get("as_name"), prefix=network.get("prefix"),
+            shared_hosting=network.get("asn") in SHARED_INFRA_ASNS,
+            hosting_abuse_contacts=hosting_abuse_contacts(ip) if ip else [],
+            registrar=rdap.get("registrar"), registrar_abuse_email=rdap.get("abuse_email"),
+            registrar_abuse_phone=rdap.get("abuse_phone"), registered_on=rdap.get("created"),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("enrichment: infrastructure summary failed for %s: %s", host, exc)
+        return None
+    return summary if any(summary.model_dump(exclude_defaults=True).values()) else None
 
 
 def domain_created(domain: str) -> datetime | None:
@@ -185,7 +267,7 @@ def enrich(host: str, fetch_result=None, resolvers: dict | None = None) -> list[
     """
     resolvers = resolvers or {}
     ip_resolver: IPResolver = resolvers.get("ip") or _default_ip_resolver
-    asn_resolver: ASNResolver = resolvers.get("asn") or _default_asn_resolver
+    asn_resolver: ASNResolver = resolvers.get("asn") or _ripestat_asn_resolver
     cert_resolver: CertResolver = resolvers.get("cert") or _default_cert_resolver
     registrar_resolver: RegistrarResolver = resolvers.get("registrar") or _default_registrar_resolver
 

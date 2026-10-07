@@ -26,7 +26,7 @@ persisted to `backend/data/upi_shield.db` (override with `UPI_SHIELD_DB`).
 | System | `GET /health`, `GET /stats`, `POST /admin/seed` |
 | Ingestion | `POST /ingest/url`, `POST /ingest/message`, `POST /ingest/batch`, `POST /ingest/feed`, `POST /ingest/app`, `POST /ingest/app/url`, `POST /crawl/ct` |
 | Jobs | `GET /jobs`, `GET /jobs/{id}` |
-| Analysis | `GET /candidates` (filters: `min_score`, `verdict`, `kind`, `brand`, `source`, `campaign_id`, `q`, `limit`, `offset`), `GET /candidates/{id}`, `GET /campaigns`, `GET /campaigns/{id}`, `GET /graph` |
+| Analysis | `GET /candidates` (filters: `min_score`, `verdict`, `kind`, `brand`, `source`, `campaign_id`, `q`, `limit`, `offset`), `GET /candidates/{id}`, `GET /campaigns`, `GET /campaigns/{id}`, `GET /graph`, `GET /pivot` |
 | Reporting | `POST /reports/takedown`, `GET /eval/metrics` |
 
 Batch, feed and crawl requests return `202 Accepted` with a `job_id`; poll
@@ -129,9 +129,30 @@ Play Protect report.
 | Anti-bot interstitials | Reported so analysts know the content may be hidden |
 | Throwaway domains | RDAP registration date: registered within 30 days (strong) or 180 days (weak) |
 
-Campaign clustering (`services/clustering.py`) unions candidates via shared **strong**
-entities (ip, cert_fingerprint, upi_id, phone, telegram, favicon_hash, analytics_id);
-registrar/asn are **weak** (recorded as evidence but never merge alone).
+### Infrastructure graph and campaigns (`services/graph.py`, `services/clustering.py`)
+
+Enrichment resolves each host to its IP, network (ASN, holder and prefix via RIPEstat),
+TLS certificate, registrar and registration date (RDAP), together with the **hosting
+and registrar abuse contacts** used for takedowns (`Candidate.infrastructure`).
+
+Campaigns are formed by union-find over entities that identify an operator: UPI
+handles, phone numbers, Telegram handles and bot ids, favicons, analytics ids, C2 or
+landing hosts, app package names, APK hashes and signing certificates.
+
+* **Weak entities** (registrar, ASN) are recorded as evidence but never merge
+  candidates on their own.
+* **CDN and shared hosting:** when a site sits on a CDN or shared-hosting network
+  (Cloudflare, Akamai, Fastly, GitHub, the big clouds, …), its IP and certificate are
+  shared with unrelated customers and do not link it to anything.
+* **Shared public infrastructure** (URL shorteners, hosting-platform apex domains,
+  brand-owned domains and the AOSP test signing key) never links.
+
+`GET /graph` returns sites and apps as nodes enriched with candidate facts (risk,
+verdict, brand, kind), plus entity nodes. Entity nodes carry `linking` (whether the
+value can merge campaigns) and `degree` (how many candidates use it). Edges carry
+typed relations such as `collects_payments_to`, `hosted_on`, `signed_with` and
+`communicates_with`. `GET /pivot?type=upi_id&value=…` lists every candidate that uses
+a given entity.
 
 ### Optional network stages & graceful degradation
 
