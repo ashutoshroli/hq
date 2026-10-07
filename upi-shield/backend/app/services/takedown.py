@@ -13,10 +13,66 @@ INTRO = {
 }
 
 
+# Which shared-entity types matter to each recipient. Drives the recipient-specific
+# context block so each report leads with the infrastructure that party can act on.
+RECIPIENT_ENTITY_TYPES: dict[Recipient, tuple[str, ...]] = {
+    "registrar": ("registrar",),
+    "hosting": ("ip", "asn", "cert_fingerprint"),
+    "bank": ("upi_id", "phone"),
+    "npci": ("upi_id", "phone"),
+    "cert_in": ("ip", "asn", "registrar", "upi_id", "phone"),
+    "safe_browsing": (),  # URLs are listed from members below, not shared entities
+}
+
+# Recipients who need the concrete domains being taken down. 'domain' is unique per
+# candidate (never a shared entity), so it is read from members (like safe_browsing
+# reads URLs) rather than from campaign.shared_entities.
+RECIPIENT_WANTS_DOMAINS: frozenset[Recipient] = frozenset({"registrar", "cert_in"})
+
+# Human-readable label for the recipient-specific context header.
+RECIPIENT_CONTEXT_LABEL: dict[Recipient, str] = {
+    "registrar": "Registrar / domain context",
+    "hosting": "Hosting / network context",
+    "bank": "Payment handle context",
+    "npci": "UPI handle context",
+    "cert_in": "Infrastructure context",
+    "safe_browsing": "URLs to blocklist",
+}
+
+
+def _recipient_context(campaign: Campaign, members: list[Candidate], recipient: Recipient) -> list[str]:
+    """Recipient-specific context derived from the campaign's shared_entities (plus
+    enrichment entities when present). Degrades to a '(none available)' note so the
+    report never breaks when the relevant entities are absent."""
+    lines = ["", f"{RECIPIENT_CONTEXT_LABEL[recipient]}:"]
+    if recipient == "safe_browsing":
+        urls = [m.url for m in members]
+        lines += [f"  - {u}" for u in urls] or ["  - (none available)"]
+        return lines
+
+    context: list[str] = []
+    # Per-member domains for recipients that act on the domains directly (registrar,
+    # cert_in). 'domain' is unique per candidate, so pull it from members, not shared.
+    if recipient in RECIPIENT_WANTS_DOMAINS:
+        seen: set[str] = set()
+        for m in members:
+            if m.domain and m.domain not in seen:
+                seen.add(m.domain)
+                context.append(f"  - domain: {m.domain}")
+
+    wanted = RECIPIENT_ENTITY_TYPES.get(recipient, ())
+    relevant = [e for e in campaign.shared_entities if e.type in wanted]
+    context += [f"  - {e.type}: {e.value}" for e in relevant]
+
+    lines += context or ["  - (none available)"]
+    return lines
+
+
 def generate(campaign: Campaign, members: list[Candidate], recipient: Recipient) -> TakedownReport:
     lines = [INTRO[recipient], "", f"Campaign: {campaign.name} ({campaign.size} sites, first seen {campaign.first_seen:%Y-%m-%d})", "",
              "Evidence linking these sites:"]
     lines += [f"  - shared {e.type}: {e.value}" for e in campaign.shared_entities] or ["  - (none recorded)"]
+    lines += _recipient_context(campaign, members, recipient)
     lines += ["", "Reported URLs:"]
     for m in members:
         reasons = "; ".join(s.name for s in m.signals[:3]) or "n/a"

@@ -1,6 +1,14 @@
 fastapi>=0.110
 uvicorn[standard]>=0.29
 pydantic>=2.6
-httpx>=0.27      # tests (TestClient)
+httpx>=0.27      # TestClient + crawler/fetcher HTTP (CT logs, page fetch)
 pytest>=8.0
-# add later: playwright, tldextract, python-whois, faiss-cpu, open_clip_torch, networkx
+# OPTIONAL (not required by tests or pipeline; guarded by try/except):
+#   python-whois -> optional WHOIS registrar lookup in enrichment.enrich (lazy-imported;
+#                   enrichment skips the registrar entity when absent). All other
+#                   enrichment lookups (DNS/cert) use stdlib socket/ssl.
+#   playwright  -> optional rendered fetch/screenshot (needs `playwright install chromium`)
+#   Pillow      -> optional perceptual-hash (aHash) over favicon/screenshot images in
+#                  visual.average_hash; the visual engine falls back to a pure-python
+#                  structural/text comparison when Pillow or an image is unavailable.
+# add later: tldextract, python-whois, faiss-cpu, open_clip_torch, networkx
