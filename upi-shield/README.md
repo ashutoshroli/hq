@@ -144,27 +144,53 @@ visual/behaviour stages return empty — nothing raises, so the detector still r
 
 ## Evaluation (precision / recall)
 
-A labelled sample (`backend/eval/dataset.py`, 31 items: lookalike phishing URLs with
-canned credential-harvesting page fixtures + genuine brand/legit domains) is scored by
-the real engines across three cumulative stage configurations. An item is predicted
-**malicious** when its cumulative score reaches the product cutoff (`>= 0.70`).
+    cd backend && python -m eval.evaluate   # writes eval/metrics.json and eval/benchmark_report.md
 
-    cd backend && . .venv/bin/activate
-    python -m eval.evaluate        # writes eval/metrics.json, prints the table below
+Two complementary evaluations are reported. `GET /eval/metrics` serves both
+(`stages` = controlled sample, `benchmarks` = real-world sample).
 
-Achieved on the committed sample (regenerate deterministically with the command above):
+### 1. Real-world benchmark (held-out, external labels)
+
+`eval/data/benchmark.csv`, built by `python -m eval.build_benchmark`:
+
+* **Positives:** hosts reported as active phishing by
+  [Phishing.Database](https://github.com/Phishing-Database/Phishing.Database) and
+  [OpenPhish](https://openphish.com/) whose hostname references a monitored brand. Each
+  is annotated with the brand it impersonates in `eval/data/benchmark_targets.csv`;
+  hosts attacking other organisations (for example `upiholdlogin…` targets the Uphold
+  exchange, `sbisec…` targets SBI Securities Japan) are excluded as out of scope.
+* **Negatives:** every [Tranco](https://tranco-list.eu/) top-1M domain containing a
+  brand keyword (hard negatives such as `famousbirthdays.com` or `catholicicing.com`),
+  plus a fixed random sample of 1,500 Tranco top-100k domains. Brand-owned domains are
+  excluded so the brand catalogue cannot leak labels.
+* Host-level and URL features only (the decision the CT crawler makes for a newly
+  certified name), so it is fully offline and reproducible.
+* Hosts are split into `dev` and `test` by hash. Rules were tuned by inspecting
+  **dev errors only**; `test` is the reported number.
+
+| split | n | positives | negatives | precision | recall | F1 | false-positive rate |
+|-------|---|-----------|-----------|-----------|--------|----|---------------------|
+| **test** | 1360 | 27 | 1333 | **0.875** | **0.778** | **0.824** | 0.23% |
+| dev | 1373 | 28 | 1345 | 0.920 | 0.821 | 0.868 | 0.15% |
+
+The positive class is small (95% Wilson intervals on test: precision 0.69–0.96,
+recall 0.59–0.89). Every error is listed in `eval/benchmark_report.md`. Remaining misses
+are mostly hosts whose only brand evidence is a short keyword without banking context
+(`upipayment.in`, `iciciphone.com`). The page-level stages below recover such cases
+from screenshots and DOM behaviour when the page is reachable.
+
+### 2. Controlled page-level sample (all stages)
+
+`eval/dataset.py` holds 31 hand-built items with canned page fixtures (credential-
+harvesting DOMs, reused favicons and analytics IDs). It exercises every pipeline stage
+offline, which a URL list cannot do. It is a functional regression test, not an
+estimate of real-world accuracy.
 
 | stage        | precision | recall | f1    |
 |--------------|-----------|--------|-------|
-| url_only     | 1.000     | 0.750  | 0.857 |
-| url+visual   | 1.000     | 0.875  | 0.933 |
+| url_only     | 1.000     | 0.938  | 0.968 |
+| url+visual   | 1.000     | 0.938  | 0.968 |
 | full         | 1.000     | 1.000  | 1.000 |
-
-Each stage adds recall while holding precision at 1.000: URL features catch the
-obvious lookalikes, visual similarity recovers weak-URL clones that serve a
-brand-echoing page, and behaviour pushes raw-IP / punycode clones over the line via
-their credential-harvesting DOM. `GET /eval/metrics` serves `eval/metrics.json`
-(`is_placeholder=false`) when present and falls back to a placeholder when absent.
 
 ## Campaign-clustering demo
 

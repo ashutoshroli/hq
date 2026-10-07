@@ -175,7 +175,29 @@ class StageMetrics(BaseModel):
     f1: float
 
 
+class BenchmarkMetrics(BaseModel):
+    """Precision/recall on an external, real-world labelled sample."""
+    name: str
+    description: str
+    split: str  # "test" is the held-out number; "dev" was used for tuning
+    stage: str
+    threshold: float
+    sample_size: int
+    positives: int
+    negatives: int
+    precision: float
+    recall: float
+    f1: float
+    tp: int
+    fp: int
+    fn: int
+    tn: int
+    false_positive_rate: float
+    collected: str | None = None
+
+
 class EvalMetrics(BaseModel):
     sample_size: int
     is_placeholder: bool  # True until eval/evaluate.py writes real numbers
-    stages: list[StageMetrics]
+    stages: list[StageMetrics]  # controlled fixture sample (page-level, all stages)
+    benchmarks: list[BenchmarkMetrics] = []  # real-world samples (additive, v0.2)
