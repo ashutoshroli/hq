@@ -2,7 +2,7 @@
    DONE fetcher (httpx DOM + redirect chain; optional Playwright screenshot) -> best-effort
    DONE visual similarity (lightweight pHash/structural vs brand index) -> sets visual_similarity, adds signals
    DONE behaviour (UPI PIN/OTP fields, cross-domain form action, obfuscated JS)
-   TODO enrichment (DNS/IP/ASN/WHOIS/cert) -> more Entity rows
+   DONE enrichment (DNS/IP/ASN/WHOIS/cert) -> more Entity rows (behind the fetch/enrich flag)
 """
 import logging
 import os
@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime, timezone
 
 from app.schemas import Candidate, Entity, Signal, SourceType
-from app.services import behaviour, fetcher, url_features, visual
+from app.services import behaviour, enrichment, fetcher, url_features, visual
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +54,17 @@ def analyze_url(url: str, source: SourceType, extra_entities: list[Entity] | Non
 
         # Behavioural phishing tells from the fetched DOM.
         signals.extend(behaviour.analyze_behaviour(result))
+
+    # Infrastructure enrichment runs behind the SAME fetch/enrich flag so offline
+    # tests stay deterministic (default off => lexical-only, no network). It is
+    # best-effort and never raises; merge its entities deduped by (type, value).
+    if should_fetch:
+        seen = {(e.type, e.value) for e in entities}
+        for e in enrichment.enrich(host, fetch_result=result):
+            key = (e.type, e.value)
+            if key not in seen:
+                seen.add(key)
+                entities.append(e)
 
     # risk_score = clamped sum of all signal weights; verdict recomputed from it.
     score = min(1.0, sum(s.weight for s in signals))
